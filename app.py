@@ -47,11 +47,16 @@ def format_tr(value):
 # --- VERİ ÇEKME (CACHE İLE KOTA DOSTU) ---
 # ttl=60 -> Veriyi çektikten sonra 60 saniye boyunca Google'a gitme, hafızadan kullan.
 # Bu sayede ekran donmaz.
+
 @st.cache_data(ttl=60)
 def load_data_from_sheet():
     try:
+        # ÖNEMLİ: Artık dosyadan değil, Streamlit Secrets'tan okuyoruz
+        credentials_dict = st.secrets["gcp_service_account"]
+        
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+        # .from_json_keyfile_name yerine .from_json_keyfile_dict kullanıyoruz
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open(SHEET_NAME).sheet1
         
@@ -61,13 +66,14 @@ def load_data_from_sheet():
         # Sayısal dönüşüm
         for col in df.columns:
             if col != "Tarih":
-                # Virgül/Nokta temizliği
                 df[col] = df[col].astype(str).str.replace(",", ".", regex=False)
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
         df['Tarih'] = pd.to_datetime(df['Tarih'])
         return df
     except Exception as e:
+        # Hatanın ne olduğunu ekrana yazdıralım ki görelim
+        st.error(f"Bağlantı Hatası Detayı: {e}")
         return pd.DataFrame()
 
 def calculate_net_wealth_value(row, currency_rate=1.0):
