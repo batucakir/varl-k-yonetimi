@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import uuid
 from datetime import datetime, timedelta
+import matplotlib # Renkler için gerekli
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(
@@ -35,7 +36,7 @@ PORTFOLIO = {
     "NAKİT": 42000.0
 }
 
-# --- FORMATLAMA ---
+# --- GÖRÜNÜM FORMATI (1.234,56) ---
 def format_tr(value):
     if pd.isna(value) or value == "": return "-"
     try:
@@ -44,13 +45,11 @@ def format_tr(value):
         return s.replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
-# --- VERİ ÇEKME (DÜZELTİLMİŞ) ---
+# --- VERİ ÇEKME MOTORU ---
 @st.cache_data(ttl=60)
 def load_data():
     try:
-        # Secrets'tan anahtarı al
         credentials_dict = st.secrets["gcp_service_account"]
-        
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
         client = gspread.authorize(creds)
@@ -59,29 +58,28 @@ def load_data():
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- SAYI DÜZELTME MOTORU (V21) ---
-        # Burası "Trilyon" hatasını çözen kısım
-        def clean_google_number(val):
+        # --- SİHİRLİ SAYI DÜZELTİCİ ---
+        def safe_number_clean(val):
             if pd.isna(val) or val == "": return 0.0
-            # Eğer zaten sayıysa (float/int) hiç dokunma! (Hata buradaydı)
+            
+            # 1. Zaten sayıysa (float/int) olduğu gibi döndür (HATA BURADAYDI, ÇÖZÜLDÜ)
             if isinstance(val, (int, float)):
                 return float(val)
             
-            # Eğer metinse (String) temizle
-            val = str(val).strip()
-            if "," in val:
-                # TR Formatı (1.234,56) -> Noktayı sil, virgülü nokta yap
-                val = val.replace(".", "").replace(",", ".")
-            else:
-                # Virgül yoksa ve nokta varsa (Binlik ayracı olabilir), sil
-                val = val.replace(".", "")
-                
-            try: return float(val)
+            # 2. String ise temizle
+            s = str(val).strip()
+            
+            # TR Formatı: "1.234,56" -> "1234.56"
+            if "," in s:
+                s = s.replace(".", "") # Binlik noktasını sil
+                s = s.replace(",", ".") # Virgülü nokta yap
+            
+            try: return float(s)
             except: return 0.0
 
         for col in df.columns:
             if col != "Tarih":
-                df[col] = df[col].apply(clean_google_number)
+                df[col] = df[col].apply(safe_number_clean)
         
         df['Tarih'] = pd.to_datetime(df['Tarih'])
         return df
@@ -205,7 +203,7 @@ def main():
                     st.caption(f"Kalan: {currency} {format_tr(HEDEF_SERVET_TL - net_wealth)}")
                     st.divider()
 
-                # TABLO
+                # TABLO (Renkli)
                 st.subheader("📋 Detaylı Varlık & Kâr Tablosu")
                 st.dataframe(
                     df_m.style.format({
@@ -227,7 +225,7 @@ def main():
                     st.plotly_chart(fig_trend, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                 st.divider()
 
-                # DİĞER GRAFİKLER
+                # DAĞILIM & BAR
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     st.subheader("Varlık Dağılımı")
