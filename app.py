@@ -7,15 +7,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 import uuid
 from datetime import datetime, timedelta
-import matplotlib # Renkler için gerekli
+import matplotlib
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(
-    page_title="Kişisel Varlık Paneli",
-    page_icon="💎",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="collapsed")
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
@@ -36,7 +31,6 @@ PORTFOLIO = {
     "NAKİT": 42000.0
 }
 
-# --- GÖRÜNÜM FORMATI (1.234,56) ---
 def format_tr(value):
     if pd.isna(value) or value == "": return "-"
     try:
@@ -45,7 +39,6 @@ def format_tr(value):
         return s.replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
-# --- VERİ ÇEKME MOTORU ---
 @st.cache_data(ttl=60)
 def load_data():
     try:
@@ -58,33 +51,16 @@ def load_data():
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # --- SİHİRLİ SAYI DÜZELTİCİ ---
-        def safe_number_clean(val):
-            if pd.isna(val) or val == "": return 0.0
-            
-            # 1. Zaten sayıysa (float/int) olduğu gibi döndür (HATA BURADAYDI, ÇÖZÜLDÜ)
-            if isinstance(val, (int, float)):
-                return float(val)
-            
-            # 2. String ise temizle
-            s = str(val).strip()
-            
-            # TR Formatı: "1.234,56" -> "1234.56"
-            if "," in s:
-                s = s.replace(".", "") # Binlik noktasını sil
-                s = s.replace(",", ".") # Virgülü nokta yap
-            
-            try: return float(s)
-            except: return 0.0
-
+        # Sadece virgül/nokta temizliği yapmadan direkt float'a çevirmeyi dene
+        # Çünkü bot artık temiz veri gönderiyor.
         for col in df.columns:
             if col != "Tarih":
-                df[col] = df[col].apply(safe_number_clean)
+                # Google Sheets'ten gelen sayıları zorla sayı yap
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
         
         df['Tarih'] = pd.to_datetime(df['Tarih'])
         return df
     except Exception as e:
-        st.error(f"Veri Hatası: {e}")
         return pd.DataFrame()
 
 def calculate_net_wealth_value(row, currency_rate=1.0):
@@ -113,33 +89,21 @@ def calculate_daily_change(df, current_wealth, currency_rate=1.0):
 
 def calculate_full_metrics(last_row, kur=1.0):
     data = []
-    # ALTIN
     for name, info in PORTFOLIO["ALTIN"].items():
         gf = last_row.get(info["key"], 0)
         tm = info["maliyet"] * info["adet"]
         bd = gf * info["adet"]
         kar = bd - tm
-        data.append({
-            "Grup": "Altın", "Varlık": name, "Toplam Maliyet": tm, 
-            "Brüt Değer": bd, "Vergi": 0, "Net Servet": bd, "Net Kâr": kar
-        })
-    # FON
+        data.append({"Grup": "Altın", "Varlık": name, "Toplam Maliyet": tm, "Brüt Değer": bd, "Vergi": 0, "Net Servet": bd, "Net Kâr": kar})
     for name, info in PORTFOLIO["FON"].items():
         gf = last_row.get(info["key"], 0)
         tm = info["maliyet"] * info["adet"]
         bd = gf * info["adet"]
         kar = bd - tm
         vergi = kar * FON_VERGI_ORANI if kar > 0 else 0
-        data.append({
-            "Grup": "Fon", "Varlık": name, "Toplam Maliyet": tm, 
-            "Brüt Değer": bd, "Vergi": vergi, "Net Servet": bd - vergi, "Net Kâr": kar - vergi
-        })
-    # NAKİT
+        data.append({"Grup": "Fon", "Varlık": name, "Toplam Maliyet": tm, "Brüt Değer": bd, "Vergi": vergi, "Net Servet": bd - vergi, "Net Kâr": kar - vergi})
     cash = PORTFOLIO["NAKİT"]
-    data.append({
-        "Grup": "Nakit", "Varlık": "TL Bakiye", "Toplam Maliyet": cash, 
-        "Brüt Değer": cash, "Vergi": 0, "Net Servet": cash, "Net Kâr": 0
-    })
+    data.append({"Grup": "Nakit", "Varlık": "TL Bakiye", "Toplam Maliyet": cash, "Brüt Değer": cash, "Vergi": 0, "Net Servet": cash, "Net Kâr": 0})
     
     df = pd.DataFrame(data)
     for c in ["Toplam Maliyet", "Brüt Değer", "Vergi", "Net Servet", "Net Kâr"]:
@@ -157,7 +121,6 @@ def prepare_total_trend_chart(df_raw, currency_rate=1.0):
 
 def main():
     st.markdown("<h1 style='text-align: center; color: #DAA520;'>💎 Kişisel Varlık Paneli</h1>", unsafe_allow_html=True)
-    
     df_csv = load_data()
     
     if not df_csv.empty:
@@ -169,53 +132,34 @@ def main():
             st.header("⚙️ Ayarlar")
             st.write(f"💵 Dolar: **{format_tr(usd)} TL**")
             st.write(f"⚖️ Stopaj: **%{FON_VERGI_ORANI*100}**")
-            try: st.caption(f"⏱ {last_row['Tarih'].strftime('%d.%m %H:%M')}")
-            except: pass
-            
             if st.button("🔄 Yenile"):
                 st.cache_data.clear()
                 st.rerun()
 
         tab_tl, tab_usd = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
-        
         for tab, currency, rate in [(tab_tl, "TL", 1.0), (tab_usd, "$", usd)]:
             with tab:
                 df_m = calculate_full_metrics(last_row, rate)
                 net_wealth = df_m["Net Servet"].sum()
                 net_profit = df_m["Net Kâr"].sum()
-                total_cost = df_m["Toplam Maliyet"].sum()
-                total_tax = df_m["Vergi"].sum()
-                total_profit_rate = (net_profit / total_cost * 100) if total_cost > 0 else 0
                 daily_chg, daily_pct = calculate_daily_change(df_csv, net_wealth, rate)
                 
-                # KPI
                 c1, c2, c3 = st.columns([2, 1, 1])
                 c1.metric("🚀 TOPLAM SERVET", f"{currency} {format_tr(net_wealth)}", f"{format_tr(daily_pct)}% (24s)")
-                c2.metric("💰 Net Kâr", f"{currency} {format_tr(net_profit)}", f"Vergi: -{currency}{format_tr(total_tax)}", delta_color="inverse")
-                c3.metric("📈 Genel Kâr Oranı", f"%{format_tr(total_profit_rate)}", "Ortalama")
+                c2.metric("💰 Net Kâr", f"{currency} {format_tr(net_profit)}", delta_color="inverse")
+                c3.metric("📈 Genel Kâr Oranı", f"%{format_tr((net_profit/df_m['Toplam Maliyet'].sum()*100))}")
                 st.divider()
                 
-                # HEDEF
                 if currency == "TL":
                     prog = min(net_wealth / HEDEF_SERVET_TL, 1.0)
                     st.subheader(f"🎯 Hedef: {format_tr(HEDEF_SERVET_TL)} TL")
                     st.progress(prog)
-                    st.caption(f"Kalan: {currency} {format_tr(HEDEF_SERVET_TL - net_wealth)}")
                     st.divider()
 
-                # TABLO (Renkli)
                 st.subheader("📋 Detaylı Varlık & Kâr Tablosu")
-                st.dataframe(
-                    df_m.style.format({
-                        "Toplam Maliyet": format_tr, "Net Servet": format_tr, 
-                        "Net Kâr": format_tr, "Vergi": format_tr, 
-                        "Kâr Oranı (%)": lambda x: f"%{format_tr(x)}"
-                    }).background_gradient(subset=["Kâr Oranı (%)"], cmap="RdYlGn", vmin=-10, vmax=100),
-                    use_container_width=True, hide_index=True
-                )
+                st.dataframe(df_m.style.format({"Toplam Maliyet": format_tr, "Net Servet": format_tr, "Net Kâr": format_tr, "Vergi": format_tr, "Kâr Oranı (%)": lambda x: f"%{format_tr(x)}"}).background_gradient(subset=["Kâr Oranı (%)"], cmap="RdYlGn", vmin=-10, vmax=100), use_container_width=True, hide_index=True)
                 st.divider()
 
-                # GRAFİK
                 st.subheader(f"📈 Zamansal Servet Değişimi ({currency})")
                 df_trend = prepare_total_trend_chart(df_csv, rate)
                 if not df_trend.empty:
@@ -225,12 +169,10 @@ def main():
                     st.plotly_chart(fig_trend, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                 st.divider()
 
-                # DAĞILIM & BAR
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     st.subheader("Varlık Dağılımı")
-                    fig_p = px.pie(df_m, values='Net Servet', names='Grup', hole=0.5, 
-                                   color='Grup', color_discrete_map={'Altın':'#FFD700', 'Fon':'#4169E1', 'Nakit':'#90EE90'})
+                    fig_p = px.pie(df_m, values='Net Servet', names='Grup', hole=0.5, color='Grup', color_discrete_map={'Altın':'#FFD700', 'Fon':'#4169E1', 'Nakit':'#90EE90'})
                     st.plotly_chart(fig_p, use_container_width=True, key=f"p_{currency}_{uuid.uuid4()}")
                 with col_g2:
                     st.subheader("Maliyet vs Net Değer")
@@ -239,10 +181,9 @@ def main():
                     fig_b.add_trace(go.Bar(name='Net Servet', x=df_m['Varlık'], y=df_m['Net Servet'], marker_color='forestgreen'))
                     fig_b.update_layout(barmode='group')
                     st.plotly_chart(fig_b, use_container_width=True, key=f"b_{currency}_{uuid.uuid4()}")
-
     else:
-        st.info("☁️ Veriler yükleniyor...")
-        
+        st.info("☁️ Veri yok. Botun çalışmasını bekleyin...")
+    
     time.sleep(60)
     st.rerun()
 
