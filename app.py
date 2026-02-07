@@ -168,18 +168,45 @@ def main():
         for tab, currency, rate in [(tab_tl, "TL", 1.0), (tab_usd, "$", usd)]:
             with tab:
                 df_m = calculate_full_metrics(last_row, rate)
-                net_wealth = df_m["Net Servet"].sum()
-                net_profit = df_m["Net Kâr"].sum()
-                daily_chg, daily_pct = calculate_daily_change(df_csv, net_wealth, rate)
+                
+                # Toplamlar (Brüt, Vergi, Net)
+                total_net_wealth = df_m["Net Servet"].sum()
+                total_gross_wealth = df_m["Brüt Değer"].sum()
+                total_tax = df_m["Vergi"].sum()
+                total_net_profit = df_m["Net Kâr"].sum()
+                total_cost = df_m["Toplam Maliyet"].sum()
+                
+                daily_chg, daily_pct = calculate_daily_change(df_csv, total_net_wealth, rate)
                 
                 c1, c2, c3 = st.columns([2, 1, 1])
-                c1.metric("🚀 TOPLAM SERVET", f"{currency} {format_tr_money(net_wealth)}", f"{format_tr_percent(daily_pct)} (24s)")
-                c2.metric("💰 Net Kâr", f"{currency} {format_tr_money(net_profit)}", delta_color="inverse")
-                c3.metric("📈 Genel Kâr Oranı", f"{format_tr_percent((net_profit/df_m['Toplam Maliyet'].sum()*100))}")
+                
+                # 1. KART: TOPLAM PORTFÖY (NET) + VERGİ DETAYI
+                c1.metric(
+                    "🚀 TOPLAM PORTFÖY BÜYÜKLÜĞÜ (NET)", 
+                    f"{currency} {format_tr_money(total_net_wealth)}", 
+                    f"Vergi: -{currency}{format_tr_money(total_tax)}", 
+                    delta_color="inverse"
+                )
+                
+                # 2. KART: NET KÂR
+                c2.metric(
+                    "💰 Net Kâr", 
+                    f"{currency} {format_tr_money(total_net_profit)}", 
+                    f"{format_tr_percent(daily_pct)} (24s)",
+                    delta_color="normal"
+                )
+                
+                # 3. KART: KÂR ORANI
+                if total_cost > 0:
+                    profit_ratio = (total_net_profit / total_cost) * 100
+                else:
+                    profit_ratio = 0
+                c3.metric("📈 Genel Kâr Oranı", f"{format_tr_percent(profit_ratio)}")
+                
                 st.divider()
                 
                 if currency == "TL":
-                    prog = min(net_wealth / HEDEF_SERVET_TL, 1.0)
+                    prog = min(total_net_wealth / HEDEF_SERVET_TL, 1.0)
                     st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
                     st.progress(prog)
                     st.divider()
@@ -222,12 +249,11 @@ def main():
                     fig_b.update_layout(barmode='group')
                     st.plotly_chart(fig_b, use_container_width=True, key=f"b_{currency}_{uuid.uuid4()}")
                 
-                # --- YENİ BÖLÜM: ALTIN PİYASASI VE MAKAS ANALİZİ ---
+                # --- ALTIN PİYASASI VE MAKAS ---
                 st.divider()
                 st.subheader("🥇 Canlı Piyasa: Altın Alış-Satış ve Makas Analizi (TL)")
                 
                 gold_cols = st.columns(4)
-                # Gösterilecek altın tipleri ve veri anahtarları
                 gold_types = [
                     ("Gram Altın", "GRAM ALTIN"),
                     ("Ata Altın", "ATA ALTIN"),
@@ -236,19 +262,12 @@ def main():
                 ]
 
                 for i, (name, key_prefix) in enumerate(gold_types):
-                    # Verileri çek
                     alis = last_row.get(f"{key_prefix} ALIŞ", 0) / rate
                     satis = last_row.get(f"{key_prefix} SATIŞ", 0) / rate
-                    
-                    # Makas hesabı
                     fark = satis - alis
-                    if satis > 0:
-                        yuzde_makas = (fark / satis) * 100
-                    else:
-                        yuzde_makas = 0
+                    yuzde_makas = (fark / satis) * 100 if satis > 0 else 0
                     
                     with gold_cols[i]:
-                        # Özel tasarım kutucuk (CSS ile)
                         st.markdown(f"""
                         <div style="
                             border: 1px solid #444; 
