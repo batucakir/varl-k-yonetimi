@@ -34,7 +34,7 @@ def format_tr(value):
     if pd.isna(value) or value == "": return "-"
     try:
         val = float(value)
-        s = "{:,.2f}".format(val)
+        s = "{:,.0f}".format(val)
         return s.replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
