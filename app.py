@@ -13,8 +13,8 @@ st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layou
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
-HEDEF_SERVET_TL = 2000000  # Yeni Hedef: 2 Milyon TL
-HEDEF_TARIH = datetime(2026, 2, 28) # Hedef Tarihi: Şubat Sonu
+HEDEF_SERVET_TL = 2000000 
+HEDEF_TARIH = datetime(2026, 2, 28)
 FON_VERGI_ORANI = 0.175
 
 PORTFOLIO = {
@@ -176,7 +176,6 @@ def calculate_full_metrics(last_row, kur=1.0):
     
     df["Kâr Oranı (%)"] = df.apply(lambda x: (x["Net Kâr"] / x["Toplam Maliyet"] * 100) if x["Toplam Maliyet"] > 0 else 0, axis=1)
     
-    # Sütun sırasını düzenle
     cols = ["Grup", "Varlık", "Adet", "Birim Fiyat", "Toplam Maliyet", "Brüt Değer", "Vergi", "Net Servet", "Net Kâr", "Kâr Oranı (%)"]
     return df[cols]
 
@@ -245,11 +244,14 @@ def main():
                     if remaining_days < 0: remaining_days = 0
                     
                     prog = min(total_net_wealth / HEDEF_SERVET_TL, 1.0)
+                    kalan_tutar = HEDEF_SERVET_TL - total_net_wealth
+                    kalan_yuzde = (kalan_tutar / HEDEF_SERVET_TL) * 100 if kalan_tutar > 0 else 0
+                    
                     st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
                     st.progress(prog)
-                    # Alt bilgi: Kalan Para | Kalan Gün
+                    
                     c_h1, c_h2 = st.columns(2)
-                    c_h1.caption(f"🏁 Kalan Tutar: **{format_tr_money(HEDEF_SERVET_TL - total_net_wealth)} TL**")
+                    c_h1.caption(f"🏁 Kalan: **{format_tr_money(kalan_tutar)} TL** (▼ {format_tr_percent(kalan_yuzde)})")
                     c_h2.caption(f"⏳ Bitiş: **28 Şubat 2026** ({remaining_days} gün kaldı)")
                     
                     st.divider()
@@ -285,6 +287,8 @@ def main():
                 with col_g1:
                     st.subheader("Varlık Dağılımı")
                     fig_p = px.pie(df_m, values='Net Servet', names='Grup', hole=0.5, color='Grup', color_discrete_map={'Altın':'#FFD700', 'Fon':'#4169E1', 'Nakit':'#90EE90'})
+                    # --- GÜNCELLEME BURADA YAPILDI ---
+                    fig_p.update_traces(textinfo='percent+label', textfont_size=18)
                     st.plotly_chart(fig_p, use_container_width=True, key=f"p_{currency}_{uuid.uuid4()}")
                 with col_g2:
                     st.subheader("Maliyet vs Net Değer")
