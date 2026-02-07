@@ -12,8 +12,10 @@ SHEET_NAME = "PortfoyVerileri"
 MY_FUNDS = ["TLY", "DFI", "TP2"]
 SCHEDULED_TIMES = ["09:15", "10:00", "13:30", "18:00"]
 
-HEADERS = [
-    "Tarih", "DOLAR KURU",
+# --- SENİN BELİRLEDİĞİN SABİT SÜTUN SIRASI ---
+SUTUN_SIRASI = [
+    "Tarih", 
+    "DOLAR KURU",
     "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ",
     "22 AYAR ALTIN ALIŞ", "22 AYAR ALTIN SATIŞ",
     "ATA ALTIN ALIŞ", "ATA ALTIN SATIŞ",
@@ -28,6 +30,7 @@ USER_AGENTS = [
 ]
 
 def connect_to_sheet():
+    """Bağlantı koparsa 3 kere tekrar dener"""
     retries = 3
     for i in range(retries):
         try:
@@ -41,8 +44,7 @@ def connect_to_sheet():
             time.sleep(5)
     return None
 
-def clean_currency_from_web(value_str):
-    """Web sitesinden (TEFAS/Altın) gelen veriyi temizler"""
+def clean_currency(value_str):
     if not value_str: return 0.0
     value_str = str(value_str).strip()
     match = re.search(r'([\d\.,]+)', value_str)
@@ -59,54 +61,33 @@ def clean_currency_from_web(value_str):
              return float(clean_str.replace(',', ''))
     return float(clean_str)
 
-def clean_value_from_sheet(value):
-    """Google Sheets'ten okunan veriyi (1.234,56) Python sayısına (1234.56) çevirir"""
-    if not value: return 0.0
-    try:
-        # Eğer zaten sayıysa direkt döndür
-        if isinstance(value, (int, float)):
-            return float(value)
-        
-        val_str = str(value).strip()
-        # "1.234,56" formatını düzelt: Noktaları sil, virgülü nokta yap
-        if "," in val_str and "." in val_str:
-            val_str = val_str.replace(".", "") # Binlik ayracını sil
-            val_str = val_str.replace(",", ".") # Ondalık ayracını düzelt
-        elif "," in val_str:
-            val_str = val_str.replace(",", ".")
-            
-        return float(val_str)
-    except:
-        return 0.0
-
 def get_last_known_from_sheet(sheet):
-    """Sheet'teki son satırı okur ve hafızaya alır"""
+    """
+    Bot ilk açıldığında Google Sheets'teki son satırı okur.
+    Böylece bot kapalıyken kaydedilmiş son fon fiyatlarını hafızaya alır.
+    """
     print("☁️ Google Sheets hafızası taranıyor...")
     memory = {}
     try:
         all_values = sheet.get_all_values()
-        if len(all_values) < 2: 
-            print("⚠️ Tablo boş, hafıza alınamadı.")
-            return {}
+        if len(all_values) < 2: return {} # Sadece başlık varsa boş dön
         
-        # Son satırı al
         last_row = all_values[-1]
         headers = all_values[0]
         
+        # Sütunları eşleştir
         for i, h in enumerate(headers):
-            # Fon sütunlarını bul
             if "FİYAT" in h and i < len(last_row):
-                raw_val = last_row[i]
-                val = clean_value_from_sheet(raw_val)
-                
-                if val > 0:
-                    memory[h] = val
-                    print(f"   💡 Hafızaya Alındı: {h} = {val}")
-                else:
-                    print(f"   ⚠️ {h} için son değer 0 veya okunamadı: {raw_val}")
-                    
+                try:
+                    # Sheet'ten gelen "1.234,56" veya "1234.56" verisini temizle
+                    val_str = str(last_row[i]).replace(",", ".")
+                    val = float(val_str)
+                    if val > 0:
+                        memory[h] = val
+                        print(f"   💡 Hafızada: {h} = {val}")
+                except: pass
     except Exception as e:
-        print(f"🔥 Hafıza okuma hatası: {e}")
+        print(f"⚠️ Hafıza okuma hatası: {e}")
     return memory
 
 def fetch_usd():
@@ -131,18 +112,18 @@ def fetch_gold():
                 name = cols[0].get_text(strip=True).upper()
                 for key, keywords in targets.items():
                     if any(k in name for k in keywords):
-                        data[f"{key} ALIŞ"] = clean_currency_from_web(cols[1].get_text())
-                        data[f"{key} SATIŞ"] = clean_currency_from_web(cols[2].get_text())
+                        data[f"{key} ALIŞ"] = clean_currency(cols[1].get_text())
+                        data[f"{key} SATIŞ"] = clean_currency(cols[2].get_text())
         return data
     except Exception as e:
-        print(f"⚠️ Altın çekilemedi: {e}")
+        print(f"⚠️ Altın Hatası: {e}")
         return {}
 
 def fetch_fund_single(code):
     url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
     headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
     try:
-        time.sleep(random.uniform(2, 4))
+        time.sleep(random.uniform(2, 5))
         resp = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
         
@@ -150,59 +131,53 @@ def fetch_fund_single(code):
         if top_list:
             for li in top_list.find_all("li"):
                 if "Son Fiyat" in li.get_text():
-                    return clean_currency_from_web(li.get_text().split("Fiyat")[-1])
+                    return clean_currency(li.get_text().split("Fiyat")[-1])
         
-        val = soup.select_one(".main-indicators li:first-child span")
-        if val: return clean_currency_from_web(val.get_text())
-        
+        item = soup.select_one(".top-list > li:nth-of-type(1) span:last-child")
+        if item: return clean_currency(item.get_text())
         return 0.0
     except: return 0.0
 
-def update_funds_smart(current_cache, force_update=False):
-    """
-    Fonları günceller. 
-    Eğer veri çekemezse (0 gelirse), KESİNLİKLE current_cache'deki eski değeri korur.
-    """
-    if force_update: print("\n🌍 FON GÜNCELLEMESİ (TEFAS)...")
-    
-    # Hafızayı kopyala (Böylece yeni veri gelmezse eskisi silinmez)
+def update_all_funds(current_cache, force_update=False):
+    """Fonları çeker. Veri gelmezse ESKİYİ KORUR (Sıfır yazmaz)."""
+    if force_update: print("\n🌍 FON GÜNCELLEMESİ BAŞLADI...")
     new_cache = current_cache.copy()
     
     for code in MY_FUNDS:
         key = f"{code} FİYAT"
-        old_val = new_cache.get(key, 0)
-        
-        # Eğer zorunlu güncelleme ise veya hafıza boşsa (0 ise) çekmeyi dene
-        if force_update or old_val == 0:
+        # Zorla güncelleme varsa VEYA hafızadaki değer 0 ise
+        if force_update or new_cache.get(key, 0) == 0:
             if force_update: print(f"   ⏳ {code} aranıyor...", end=" ")
             price = fetch_fund_single(code)
             
             if price > 0:
                 new_cache[key] = price
-                if force_update: print(f"✅ GÜNCEL: {price}")
+                if force_update: print(f"✅ {price}")
             else:
-                # Veri çekilemedi. Eski veriyi koru.
-                # new_cache zaten current_cache'in kopyası olduğu için 
-                # hiçbir şey yapmamıza gerek yok, eski değer içinde duruyor.
-                if force_update: print(f"❌ Çekilemedi -> Eski Veri Korunuyor: {old_val}")
+                old = new_cache.get(key, 0)
+                if force_update: print(f"❌ (Eski veri korunuyor: {old})")
     
-    if force_update: print("🌍 Bitti.\n")
+    if force_update: print("🌍 Tamamlandı.\n")
     return new_cache
 
 def main():
-    print(f"🚀 BOT V19 BAŞLATILIYOR... (Hedef: {SHEET_NAME})")
+    print(f"🤖 CLOUD BOT BAŞLATILIYOR... (Hedef: {SHEET_NAME})")
     
     sheet = connect_to_sheet()
     if not sheet:
-        print("🔥 HATA: Sheet'e bağlanılamadı.")
+        print("🔥 KRİTİK HATA: Sheet'e bağlanılamadı.")
         return
 
-    # 1. HAFIZAYI YÜKLE
-    # Bu değişken bot kapanana kadar korunacak
+    # Başlık yoksa ekle
+    if not sheet.get_all_values():
+        sheet.append_row(SUTUN_SIRASI)
+        print("📝 Tablo boştu, başlıklar eklendi.")
+
+    # 1. HAFIZAYI YÜKLE (En kritik adım)
     cached_funds = get_last_known_from_sheet(sheet)
     
-    # 2. Başlangıçta bir kez güncelle (Eksikleri tamamla)
-    cached_funds = update_funds_smart(cached_funds, force_update=True)
+    # 2. İLK TUR (Eksik varsa tamamla)
+    cached_funds = update_all_funds(cached_funds, force_update=True)
     
     last_scheduled_update = ""
 
@@ -212,36 +187,35 @@ def main():
             current_hm = now.strftime("%H:%M")
             ts = now.strftime("%Y-%m-%d %H:%M:%S")
             
-            # 3. ZAMAN KONTROLÜ
+            # Zamanlı Fon Kontrolü
             if current_hm in SCHEDULED_TIMES and current_hm != last_scheduled_update:
-                # Burada dönen değer cached_funds'ı günceller
-                # Eğer veri çekemezse eskisini döndürür
-                cached_funds = update_funds_smart(cached_funds, force_update=True)
+                cached_funds = update_all_funds(cached_funds, force_update=True)
                 last_scheduled_update = current_hm
             
-            # 4. ANLIK VERİLER
+            # Anlık Veriler
             gold = fetch_gold()
             usd = fetch_usd()
             
-            # 5. VERİ PAKETLEME
+            # Veri Paketleme
             row_dict = {"Tarih": ts, "DOLAR KURU": usd}
             if gold: row_dict.update(gold)
-            
-            # En kritik yer: cached_funds içindeki verileri (ister yeni ister eski) pakete ekle
             row_dict.update(cached_funds)
             
-            # 6. YAZMA
             if gold:
+                # --- KRİTİK NOKTA: SÜTUNLARI SIRAYA DİZ ---
+                # DataFrame yerine direkt liste hazırlıyoruz ki gspread hızlı çalışsın
                 row_values = []
-                for col in HEADERS:
-                    # Değeri al, yoksa 0 (ama cached_funds doluysa 0 olmaz)
+                for col in SUTUN_SIRASI:
+                    # Varsa değeri al, yoksa 0 (ama kaydırma yapma)
                     val = row_dict.get(col, 0.0)
                     row_values.append(val)
                 
+                # Google Sheets'e Yaz
                 try:
                     sheet.append_row(row_values)
                 except:
-                    print("♻️ Bağlantı tazeleniyor...")
+                    # Bağlantı koparsa tazele ve tekrar dene
+                    print("♻️ Bağlantı yenileniyor...")
                     sheet = connect_to_sheet()
                     sheet.append_row(row_values)
                 
@@ -249,11 +223,11 @@ def main():
                 tp2 = row_dict.get('TP2 FİYAT', 0)
                 print(f"[{ts.split()[1]}] ☁️ Kayıt OK. Gram: {gram} | TP2: {tp2}")
             
-            # Dakikada 1 işlem (API kotası için)
+            # API Kotası için bekle
             time.sleep(60)
             
         except Exception as e:
-            print(f"⚠️ Döngü Hatası: {e}")
+            print(f"⚠️ Hata: {e}")
             time.sleep(30)
 
 if __name__ == "__main__":
