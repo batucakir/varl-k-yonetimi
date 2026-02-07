@@ -1,0 +1,32 @@
+name: Finans Botu Calistir
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # <-- Burayı 5 yaptık (Her 5 dakikada bir)
+  workflow_dispatch:        # Elle çalıştırma butonu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Depoyu Çek
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install gspread oauth2client requests beautifulsoup4
+
+      - name: Kimlik Dosyasını Oluştur
+        env:
+          GCP_CREDS: ${{ secrets.GCP_CREDS }}
+        run: |
+          echo "$GCP_CREDS" > credentials.json
+
+      - name: Botu Çalıştır
+        run: python bot.py
