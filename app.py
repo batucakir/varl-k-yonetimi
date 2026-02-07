@@ -13,7 +13,8 @@ st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layou
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
-HEDEF_SERVET_TL = 2500000 
+HEDEF_SERVET_TL = 2000000  # Yeni Hedef: 2 Milyon TL
+HEDEF_TARIH = datetime(2026, 2, 28) # Hedef Tarihi: Şubat Sonu
 FON_VERGI_ORANI = 0.175
 
 PORTFOLIO = {
@@ -117,27 +118,67 @@ def calculate_daily_change(df, current_wealth, currency_rate=1.0):
 
 def calculate_full_metrics(last_row, kur=1.0):
     data = []
+    # ALTIN
     for name, info in PORTFOLIO["ALTIN"].items():
-        gf = last_row.get(info["key"], 0)
+        unit_price = last_row.get(info["key"], 0)
+        gf = unit_price
         tm = info["maliyet"] * info["adet"]
         bd = gf * info["adet"]
         kar = bd - tm
-        data.append({"Grup": "Altın", "Varlık": name, "Toplam Maliyet": tm, "Brüt Değer": bd, "Vergi": 0, "Net Servet": bd, "Net Kâr": kar})
+        data.append({
+            "Grup": "Altın", 
+            "Varlık": name, 
+            "Adet": info["adet"],
+            "Birim Fiyat": unit_price / kur,
+            "Toplam Maliyet": tm, 
+            "Brüt Değer": bd, 
+            "Vergi": 0, 
+            "Net Servet": bd, 
+            "Net Kâr": kar
+        })
+    # FON
     for name, info in PORTFOLIO["FON"].items():
-        gf = last_row.get(info["key"], 0)
+        unit_price = last_row.get(info["key"], 0)
+        gf = unit_price
         tm = info["maliyet"] * info["adet"]
         bd = gf * info["adet"]
         kar = bd - tm
         vergi = kar * FON_VERGI_ORANI if kar > 0 else 0
-        data.append({"Grup": "Fon", "Varlık": name, "Toplam Maliyet": tm, "Brüt Değer": bd, "Vergi": vergi, "Net Servet": bd - vergi, "Net Kâr": kar - vergi})
+        data.append({
+            "Grup": "Fon", 
+            "Varlık": name, 
+            "Adet": info["adet"],
+            "Birim Fiyat": unit_price / kur,
+            "Toplam Maliyet": tm, 
+            "Brüt Değer": bd, 
+            "Vergi": vergi, 
+            "Net Servet": bd - vergi, 
+            "Net Kâr": kar - vergi
+        })
+    # NAKİT
     cash = PORTFOLIO["NAKİT"]
-    data.append({"Grup": "Nakit", "Varlık": "TL Bakiye", "Toplam Maliyet": cash, "Brüt Değer": cash, "Vergi": 0, "Net Servet": cash, "Net Kâr": 0})
+    data.append({
+        "Grup": "Nakit", 
+        "Varlık": "TL Bakiye", 
+        "Adet": 1,
+        "Birim Fiyat": cash / kur,
+        "Toplam Maliyet": cash, 
+        "Brüt Değer": cash, 
+        "Vergi": 0, 
+        "Net Servet": cash, 
+        "Net Kâr": 0
+    })
     
     df = pd.DataFrame(data)
+    # Para birimi dönüşümleri
     for c in ["Toplam Maliyet", "Brüt Değer", "Vergi", "Net Servet", "Net Kâr"]:
         df[c] = df[c] / kur
+    
     df["Kâr Oranı (%)"] = df.apply(lambda x: (x["Net Kâr"] / x["Toplam Maliyet"] * 100) if x["Toplam Maliyet"] > 0 else 0, axis=1)
-    return df
+    
+    # Sütun sırasını düzenle
+    cols = ["Grup", "Varlık", "Adet", "Birim Fiyat", "Toplam Maliyet", "Brüt Değer", "Vergi", "Net Servet", "Net Kâr", "Kâr Oranı (%)"]
+    return df[cols]
 
 def prepare_total_trend_chart(df_raw, currency_rate=1.0):
     trend_data = []
@@ -169,9 +210,8 @@ def main():
             with tab:
                 df_m = calculate_full_metrics(last_row, rate)
                 
-                # Toplamlar (Brüt, Vergi, Net)
+                # Toplamlar
                 total_net_wealth = df_m["Net Servet"].sum()
-                total_gross_wealth = df_m["Brüt Değer"].sum()
                 total_tax = df_m["Vergi"].sum()
                 total_net_profit = df_m["Net Kâr"].sum()
                 total_cost = df_m["Toplam Maliyet"].sum()
@@ -180,7 +220,6 @@ def main():
                 
                 c1, c2, c3 = st.columns([2, 1, 1])
                 
-                # 1. KART: TOPLAM PORTFÖY (NET) + VERGİ DETAYI
                 c1.metric(
                     "🚀 TOPLAM PORTFÖY BÜYÜKLÜĞÜ (NET)", 
                     f"{currency} {format_tr_money(total_net_wealth)}", 
@@ -188,7 +227,6 @@ def main():
                     delta_color="inverse"
                 )
                 
-                # 2. KART: NET KÂR
                 c2.metric(
                     "💰 Net Kâr", 
                     f"{currency} {format_tr_money(total_net_profit)}", 
@@ -196,24 +234,31 @@ def main():
                     delta_color="normal"
                 )
                 
-                # 3. KART: KÂR ORANI
-                if total_cost > 0:
-                    profit_ratio = (total_net_profit / total_cost) * 100
-                else:
-                    profit_ratio = 0
+                profit_ratio = (total_net_profit / total_cost) * 100 if total_cost > 0 else 0
                 c3.metric("📈 Genel Kâr Oranı", f"{format_tr_percent(profit_ratio)}")
                 
                 st.divider()
                 
+                # --- HEDEF ve GERİ SAYIM ---
                 if currency == "TL":
+                    remaining_days = (HEDEF_TARIH - datetime.now()).days
+                    if remaining_days < 0: remaining_days = 0
+                    
                     prog = min(total_net_wealth / HEDEF_SERVET_TL, 1.0)
                     st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
                     st.progress(prog)
+                    # Alt bilgi: Kalan Para | Kalan Gün
+                    c_h1, c_h2 = st.columns(2)
+                    c_h1.caption(f"🏁 Kalan Tutar: **{format_tr_money(HEDEF_SERVET_TL - total_net_wealth)} TL**")
+                    c_h2.caption(f"⏳ Bitiş: **28 Şubat 2026** ({remaining_days} gün kaldı)")
+                    
                     st.divider()
 
                 st.subheader("📋 Detaylı Varlık & Kâr Tablosu")
                 st.dataframe(
                     df_m.style.format({
+                        "Adet": format_tr_nodigit,
+                        "Birim Fiyat": format_tr_money,
                         "Toplam Maliyet": format_tr_money,
                         "Brüt Değer": format_tr_nodigit,
                         "Vergi": format_tr_money,
@@ -249,7 +294,6 @@ def main():
                     fig_b.update_layout(barmode='group')
                     st.plotly_chart(fig_b, use_container_width=True, key=f"b_{currency}_{uuid.uuid4()}")
                 
-                # --- ALTIN PİYASASI VE MAKAS ---
                 st.divider()
                 st.subheader("🥇 Canlı Piyasa: Altın Alış-Satış ve Makas Analizi (TL)")
                 
