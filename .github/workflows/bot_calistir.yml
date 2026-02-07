@@ -2,8 +2,8 @@ name: Finans Botu Calistir
 
 on:
   schedule:
-    - cron: '*/5 * * * *'   # <-- Burayı 5 yaptık (Her 5 dakikada bir)
-  workflow_dispatch:        # Elle çalıştırma butonu
+    - cron: '*/5 * * * *'  # 5 dakikada bir çalış
+  workflow_dispatch:       # Elle tetikleme butonu
 
 jobs:
   build:
@@ -22,11 +22,12 @@ jobs:
         run: |
           pip install gspread oauth2client requests beautifulsoup4
 
+      # --- BURASI DEĞİŞTİ (DAHA GÜVENLİ YÖNTEM) ---
       - name: Kimlik Dosyasını Oluştur
         env:
           GCP_CREDS: ${{ secrets.GCP_CREDS }}
         run: |
-          echo "$GCP_CREDS" > credentials.json
+          python -c "import os; open('credentials.json', 'w').write(os.environ['GCP_CREDS'])"
 
       - name: Botu Çalıştır
         run: python bot.py
