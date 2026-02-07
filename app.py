@@ -1,191 +1,169 @@
-import streamlit as st
-import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import requests
+from bs4 import BeautifulSoup
 import time
-import plotly.graph_objects as go
-import plotly.express as px
-import uuid
-from datetime import datetime, timedelta
-import matplotlib
-
-# --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="collapsed")
+from datetime import datetime
+import re
+import random
+import os
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
-HEDEF_SERVET_TL = 2500000 
-FON_VERGI_ORANI = 0.175
+MY_FUNDS = ["TLY", "DFI", "TP2"]
 
-PORTFOLIO = {
-    "ALTIN": {
-        "22 AYAR BİLEZİK (Gr)": {"key": "22 AYAR ALTIN ALIŞ", "adet": 101, "maliyet": 2080.0}, 
-        "ATA ALTIN (Adet)": {"key": "ATA ALTIN ALIŞ", "adet": 13, "maliyet": 15000.0},
-        "ÇEYREK ALTIN (Adet)": {"key": "ÇEYREK ALTIN ALIŞ", "adet": 1, "maliyet": 3750.0}
-    },
-    "FON": {
-        "TLY FONU": {"key": "TLY FİYAT", "adet": 123, "maliyet": 3277.87461},
-        "DFI FONU": {"key": "DFI FİYAT", "adet": 22895, "maliyet": 2.395146},
-        "TP2 FONU": {"key": "TP2 FİYAT", "adet": 5679, "maliyet": 1.67554}
-    },
-    "NAKİT": 42000.0
-}
+# --- SENİN BELİRLEDİĞİN SABİT SÜTUN SIRASI (DOKUNMADIM) ---
+SUTUN_SIRASI = [
+    "Tarih", 
+    "DOLAR KURU",
+    "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ",
+    "22 AYAR ALTIN ALIŞ", "22 AYAR ALTIN SATIŞ",
+    "ATA ALTIN ALIŞ", "ATA ALTIN SATIŞ",
+    "ÇEYREK ALTIN ALIŞ", "ÇEYREK ALTIN SATIŞ",
+    "ALTIN ONS ALIŞ", "ALTIN ONS SATIŞ",
+    "TLY FİYAT", "DFI FİYAT", "TP2 FİYAT"
+]
 
-def format_tr(value):
-    if pd.isna(value) or value == "": return "-"
-    try:
-        val = float(value)
-        s = "{:,.2f}".format(val)
-        return s.replace(",", "X").replace(".", ",").replace("X", ".")
-    except: return str(value)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15"
+]
 
-@st.cache_data(ttl=60)
-def load_data():
-    try:
-        credentials_dict = st.secrets["gcp_service_account"]
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+def connect_to_sheet():
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    if os.path.exists('credentials.json'):
+        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
         client = gspread.authorize(creds)
         sheet = client.open(SHEET_NAME).sheet1
-        
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        
-        # Sadece virgül/nokta temizliği yapmadan direkt float'a çevirmeyi dene
-        # Çünkü bot artık temiz veri gönderiyor.
-        for col in df.columns:
-            if col != "Tarih":
-                # Google Sheets'ten gelen sayıları zorla sayı yap
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
-        
-        df['Tarih'] = pd.to_datetime(df['Tarih'])
-        return df
-    except Exception as e:
-        return pd.DataFrame()
+        return sheet
+    return None
 
-def calculate_net_wealth_value(row, currency_rate=1.0):
-    total = 0
-    for info in PORTFOLIO["ALTIN"].values():
-        total += row.get(info["key"], 0) * info["adet"]
-    for info in PORTFOLIO["FON"].values():
-        p = row.get(info["key"], 0)
-        brut = p * info["adet"]
-        kar = brut - (info["maliyet"] * info["adet"])
-        vergi = kar * FON_VERGI_ORANI if kar > 0 else 0
-        total += (brut - vergi)
-    total += PORTFOLIO["NAKİT"]
-    return total / currency_rate
-
-def calculate_daily_change(df, current_wealth, currency_rate=1.0):
-    if len(df) < 2: return 0, 0
-    try:
-        target_date = df.iloc[-1]['Tarih'] - timedelta(days=1)
-        idx = (df['Tarih'] - target_date).abs().idxmin()
-        old_wealth = calculate_net_wealth_value(df.loc[idx], currency_rate)
-        diff = current_wealth - old_wealth
-        pct = (diff / old_wealth * 100) if old_wealth > 0 else 0
-        return diff, pct
-    except: return 0, 0
-
-def calculate_full_metrics(last_row, kur=1.0):
-    data = []
-    for name, info in PORTFOLIO["ALTIN"].items():
-        gf = last_row.get(info["key"], 0)
-        tm = info["maliyet"] * info["adet"]
-        bd = gf * info["adet"]
-        kar = bd - tm
-        data.append({"Grup": "Altın", "Varlık": name, "Toplam Maliyet": tm, "Brüt Değer": bd, "Vergi": 0, "Net Servet": bd, "Net Kâr": kar})
-    for name, info in PORTFOLIO["FON"].items():
-        gf = last_row.get(info["key"], 0)
-        tm = info["maliyet"] * info["adet"]
-        bd = gf * info["adet"]
-        kar = bd - tm
-        vergi = kar * FON_VERGI_ORANI if kar > 0 else 0
-        data.append({"Grup": "Fon", "Varlık": name, "Toplam Maliyet": tm, "Brüt Değer": bd, "Vergi": vergi, "Net Servet": bd - vergi, "Net Kâr": kar - vergi})
-    cash = PORTFOLIO["NAKİT"]
-    data.append({"Grup": "Nakit", "Varlık": "TL Bakiye", "Toplam Maliyet": cash, "Brüt Değer": cash, "Vergi": 0, "Net Servet": cash, "Net Kâr": 0})
+def clean_currency(value_str):
+    if not value_str: return 0.0
+    value_str = str(value_str).strip()
+    match = re.search(r'([\d\.,]+)', value_str)
+    if not match: return 0.0
+    clean_str = match.group(1)
     
-    df = pd.DataFrame(data)
-    for c in ["Toplam Maliyet", "Brüt Değer", "Vergi", "Net Servet", "Net Kâr"]:
-        df[c] = df[c] / kur
-    df["Kâr Oranı (%)"] = df.apply(lambda x: (x["Net Kâr"] / x["Toplam Maliyet"] * 100) if x["Toplam Maliyet"] > 0 else 0, axis=1)
-    return df
+    # TR Formatı: 1.234,56 -> 1234.56
+    if ',' in clean_str and '.' not in clean_str:
+        return float(clean_str.replace(',', '.'))
+    if ',' in clean_str and '.' in clean_str:
+        if clean_str.rfind(',') > clean_str.rfind('.'): 
+             return float(clean_str.replace('.', '').replace(',', '.'))
+        else:
+             return float(clean_str.replace(',', ''))
+    return float(clean_str)
 
-def prepare_total_trend_chart(df_raw, currency_rate=1.0):
-    trend_data = []
-    for index, row in df_raw.iterrows():
-        dt = row['Tarih']
-        total_wealth = calculate_net_wealth_value(row, currency_rate)
-        trend_data.append({"Tarih": dt, "Toplam Servet": total_wealth})
-    return pd.DataFrame(trend_data)
+def get_last_known_from_sheet(sheet):
+    """HAFIZA: Bot açıldığında son verileri hatırlar."""
+    print("☁️ Google Sheets hafızası taranıyor...")
+    memory = {}
+    try:
+        all_values = sheet.get_all_values()
+        if len(all_values) < 2: return {}
+        last_row = all_values[-1]
+        headers = all_values[0]
+        for i, h in enumerate(headers):
+            if "FİYAT" in h and i < len(last_row):
+                try:
+                    val_str = str(last_row[i]).replace(",", ".")
+                    val = float(val_str)
+                    if val > 0: memory[h] = val
+                except: pass
+    except: pass
+    return memory
+
+def fetch_usd():
+    try:
+        url = "https://api.exchangerate-api.com/v4/latest/USD"
+        resp = requests.get(url, timeout=5).json()
+        return float(resp['rates']['TRY'])
+    except: return 0.0
+
+def fetch_gold():
+    url = f"https://anlikaltinfiyatlari.com/altin/kapalicarsi?v={random.random()}"
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
+    data = {}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.content, "html.parser")
+        targets = {"GRAM ALTIN": ["GRAM ALTIN"], "22 AYAR ALTIN": ["22 AYAR"], 
+                   "ATA ALTIN": ["ATA ALTIN"], "ÇEYREK ALTIN": ["ÇEYREK ALTIN"], "ALTIN ONS": ["ONS"]}
+        for row in soup.find_all("tr"):
+            cols = row.find_all("td")
+            if len(cols) > 2:
+                name = cols[0].get_text(strip=True).upper()
+                for key, keywords in targets.items():
+                    if any(k in name for k in keywords):
+                        data[f"{key} ALIŞ"] = clean_currency(cols[1].get_text())
+                        data[f"{key} SATIŞ"] = clean_currency(cols[2].get_text())
+        return data
+    except: return {}
+
+def fetch_fund_single(code):
+    url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
+    headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
+    try:
+        time.sleep(1)
+        resp = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(resp.content, "html.parser")
+        top_list = soup.find("ul", class_="top-list")
+        if top_list:
+            for li in top_list.find_all("li"):
+                if "Son Fiyat" in li.get_text():
+                    return clean_currency(li.get_text().split("Fiyat")[-1])
+        item = soup.select_one(".top-list > li:nth-of-type(1) span:last-child")
+        if item: return clean_currency(item.get_text())
+        return 0.0
+    except: return 0.0
+
+def update_all_funds(current_cache):
+    """Fonları çeker, 0 gelirse eskiyi korur."""
+    print("\n🌍 FON GÜNCELLEMESİ (Cloud)...")
+    new_cache = current_cache.copy()
+    for code in MY_FUNDS:
+        key = f"{code} FİYAT"
+        print(f"   ⏳ {code} aranıyor...", end=" ")
+        price = fetch_fund_single(code)
+        if price > 0:
+            new_cache[key] = price
+            print(f"✅ {price}")
+        else:
+            old = new_cache.get(key, 0)
+            print(f"❌ Çekilemedi, Eski ({old}) korunuyor.")
+    return new_cache
 
 def main():
-    st.markdown("<h1 style='text-align: center; color: #DAA520;'>💎 Kişisel Varlık Paneli</h1>", unsafe_allow_html=True)
-    df_csv = load_data()
+    print("🚀 BOT ÇALIŞIYOR...")
+    sheet = connect_to_sheet()
+    if not sheet: return
+
+    if not sheet.get_all_values():
+        sheet.append_row(SUTUN_SIRASI)
+
+    cached_funds = get_last_known_from_sheet(sheet)
+    cached_funds = update_all_funds(cached_funds)
     
-    if not df_csv.empty:
-        last_row = df_csv.iloc[-1]
-        usd = last_row.get("DOLAR KURU", 1.0)
-        if usd == 0 or pd.isna(usd): usd = 1.0
+    gold = fetch_gold()
+    usd = fetch_usd()
+    
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row_dict = {"Tarih": ts, "DOLAR KURU": usd}
+    if gold: row_dict.update(gold)
+    row_dict.update(cached_funds)
+    
+    if gold:
+        row_values = []
+        for col in SUTUN_SIRASI:
+            row_values.append(row_dict.get(col, 0.0))
         
-        with st.sidebar:
-            st.header("⚙️ Ayarlar")
-            st.write(f"💵 Dolar: **{format_tr(usd)} TL**")
-            st.write(f"⚖️ Stopaj: **%{FON_VERGI_ORANI*100}**")
-            if st.button("🔄 Yenile"):
-                st.cache_data.clear()
-                st.rerun()
-
-        tab_tl, tab_usd = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
-        for tab, currency, rate in [(tab_tl, "TL", 1.0), (tab_usd, "$", usd)]:
-            with tab:
-                df_m = calculate_full_metrics(last_row, rate)
-                net_wealth = df_m["Net Servet"].sum()
-                net_profit = df_m["Net Kâr"].sum()
-                daily_chg, daily_pct = calculate_daily_change(df_csv, net_wealth, rate)
-                
-                c1, c2, c3 = st.columns([2, 1, 1])
-                c1.metric("🚀 TOPLAM SERVET", f"{currency} {format_tr(net_wealth)}", f"{format_tr(daily_pct)}% (24s)")
-                c2.metric("💰 Net Kâr", f"{currency} {format_tr(net_profit)}", delta_color="inverse")
-                c3.metric("📈 Genel Kâr Oranı", f"%{format_tr((net_profit/df_m['Toplam Maliyet'].sum()*100))}")
-                st.divider()
-                
-                if currency == "TL":
-                    prog = min(net_wealth / HEDEF_SERVET_TL, 1.0)
-                    st.subheader(f"🎯 Hedef: {format_tr(HEDEF_SERVET_TL)} TL")
-                    st.progress(prog)
-                    st.divider()
-
-                st.subheader("📋 Detaylı Varlık & Kâr Tablosu")
-                st.dataframe(df_m.style.format({"Toplam Maliyet": format_tr, "Net Servet": format_tr, "Net Kâr": format_tr, "Vergi": format_tr, "Kâr Oranı (%)": lambda x: f"%{format_tr(x)}"}).background_gradient(subset=["Kâr Oranı (%)"], cmap="RdYlGn", vmin=-10, vmax=100), use_container_width=True, hide_index=True)
-                st.divider()
-
-                st.subheader(f"📈 Zamansal Servet Değişimi ({currency})")
-                df_trend = prepare_total_trend_chart(df_csv, rate)
-                if not df_trend.empty:
-                    fig_trend = px.area(df_trend, x="Tarih", y="Toplam Servet", line_shape='spline')
-                    fig_trend.update_layout(xaxis_title=None, yaxis_title=None, height=400, hovermode="x unified", showlegend=False)
-                    fig_trend.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
-                    st.plotly_chart(fig_trend, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
-                st.divider()
-
-                col_g1, col_g2 = st.columns(2)
-                with col_g1:
-                    st.subheader("Varlık Dağılımı")
-                    fig_p = px.pie(df_m, values='Net Servet', names='Grup', hole=0.5, color='Grup', color_discrete_map={'Altın':'#FFD700', 'Fon':'#4169E1', 'Nakit':'#90EE90'})
-                    st.plotly_chart(fig_p, use_container_width=True, key=f"p_{currency}_{uuid.uuid4()}")
-                with col_g2:
-                    st.subheader("Maliyet vs Net Değer")
-                    fig_b = go.Figure()
-                    fig_b.add_trace(go.Bar(name='Maliyet', x=df_m['Varlık'], y=df_m['Toplam Maliyet'], marker_color='lightgrey'))
-                    fig_b.add_trace(go.Bar(name='Net Servet', x=df_m['Varlık'], y=df_m['Net Servet'], marker_color='forestgreen'))
-                    fig_b.update_layout(barmode='group')
-                    st.plotly_chart(fig_b, use_container_width=True, key=f"b_{currency}_{uuid.uuid4()}")
-    else:
-        st.info("☁️ Veri yok. Botun çalışmasını bekleyin...")
-    
-    time.sleep(60)
-    st.rerun()
+        try:
+            # Burası çok önemli: Google'a "Bu veriyi kendi formatında işle" diyoruz.
+            sheet.append_row(row_values, value_input_option='USER_ENTERED')
+            print("✅ KAYIT BAŞARILI.")
+        except Exception as e:
+            print(f"🔥 Yazma Hatası: {e}")
 
 if __name__ == "__main__":
     main()
