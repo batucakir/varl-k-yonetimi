@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(
-    page_title="Bulut Varlık Paneli",
-    page_icon="☁️",
+    page_title="Kişisel Varlık Paneli",
+    page_icon="💎",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -44,18 +44,14 @@ def format_tr(value):
         return s.replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
-# --- VERİ ÇEKME (CACHE İLE KOTA DOSTU) ---
-# ttl=60 -> Veriyi çektikten sonra 60 saniye boyunca Google'a gitme, hafızadan kullan.
-# Bu sayede ekran donmaz.
-
+# --- VERİ ÇEKME (SECRETS İLE) ---
 @st.cache_data(ttl=60)
-def load_data_from_sheet():
+def load_data():
     try:
-        # ÖNEMLİ: Artık dosyadan değil, Streamlit Secrets'tan okuyoruz
+        # Streamlit Secrets'tan bilgileri al
         credentials_dict = st.secrets["gcp_service_account"]
         
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        # .from_json_keyfile_name yerine .from_json_keyfile_dict kullanıyoruz
         creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open(SHEET_NAME).sheet1
@@ -63,7 +59,7 @@ def load_data_from_sheet():
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # Sayısal dönüşüm
+        # Sayısal dönüşüm (Google Sheets bazen string gönderebilir)
         for col in df.columns:
             if col != "Tarih":
                 df[col] = df[col].astype(str).str.replace(",", ".", regex=False)
@@ -72,8 +68,7 @@ def load_data_from_sheet():
         df['Tarih'] = pd.to_datetime(df['Tarih'])
         return df
     except Exception as e:
-        # Hatanın ne olduğunu ekrana yazdıralım ki görelim
-        st.error(f"Bağlantı Hatası Detayı: {e}")
+        # Bağlantı hatası olursa boş dönme, hata bas
         return pd.DataFrame()
 
 def calculate_net_wealth_value(row, currency_rate=1.0):
@@ -91,12 +86,14 @@ def calculate_net_wealth_value(row, currency_rate=1.0):
 
 def calculate_daily_change(df, current_wealth, currency_rate=1.0):
     if len(df) < 2: return 0, 0
-    target_date = df.iloc[-1]['Tarih'] - timedelta(days=1)
-    idx = (df['Tarih'] - target_date).abs().idxmin()
-    old_wealth = calculate_net_wealth_value(df.loc[idx], currency_rate)
-    diff = current_wealth - old_wealth
-    pct = (diff / old_wealth * 100) if old_wealth > 0 else 0
-    return diff, pct
+    try:
+        target_date = df.iloc[-1]['Tarih'] - timedelta(days=1)
+        idx = (df['Tarih'] - target_date).abs().idxmin()
+        old_wealth = calculate_net_wealth_value(df.loc[idx], currency_rate)
+        diff = current_wealth - old_wealth
+        pct = (diff / old_wealth * 100) if old_wealth > 0 else 0
+        return diff, pct
+    except: return 0, 0
 
 def calculate_full_metrics(last_row, kur=1.0):
     data = []
@@ -143,12 +140,10 @@ def prepare_total_trend_chart(df_raw, currency_rate=1.0):
     return pd.DataFrame(trend_data)
 
 def main():
-    st.markdown("<h1 style='text-align: center; color: #DAA520;'>☁️ Kişisel Varlık Paneli (Bulut)</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #DAA520;'>💎 Kişisel Varlık Paneli (Cloud)</h1>", unsafe_allow_html=True)
     
-    # 60 saniyede bir sayfayı yenileyerek yeni veri var mı bakar
-    # while loop yerine Streamlit'in kendi akışını kullanıyoruz.
-    
-    df_csv = load_data_from_sheet()
+    # Veriyi çek (Cache sayesinde her saniye gitmez)
+    df_csv = load_data()
     
     if not df_csv.empty:
         last_row = df_csv.iloc[-1]
@@ -162,7 +157,8 @@ def main():
             try: st.caption(f"⏱ {last_row['Tarih'].strftime('%d.%m %H:%M')}")
             except: pass
             if st.button("🔄 Verileri Yenile"):
-                st.cache_data.clear() # Butona basınca cache'i silip zorla yeniler
+                st.cache_data.clear()
+                st.rerun()
 
         tab_tl, tab_usd = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
         
@@ -188,7 +184,7 @@ def main():
                     prog = min(net_wealth / HEDEF_SERVET_TL, 1.0)
                     st.subheader(f"🎯 Hedef: {format_tr(HEDEF_SERVET_TL)} TL")
                     st.progress(prog)
-                    st.caption(f"Kalan: {currency} {format_tr(HEDEF_SERVET_TL - net_wealth)}")
+                    st.caption(f"Tamamlanan: %{format_tr(prog*100)} | Kalan: {currency} {format_tr(HEDEF_SERVET_TL - net_wealth)}")
                     st.divider()
 
                 # TABLO
@@ -211,9 +207,10 @@ def main():
                     fig_trend.update_layout(xaxis_title=None, yaxis_title=None, height=400, hovermode="x unified", showlegend=False)
                     fig_trend.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                     st.plotly_chart(fig_trend, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
+                
                 st.divider()
 
-                # DAĞILIM
+                # DAĞILIM & BAR
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     st.subheader("Varlık Dağılımı")
@@ -231,7 +228,7 @@ def main():
     else:
         st.info("☁️ Google Sheets'ten veri bekleniyor... (Lütfen bot.py çalışıyor mu kontrol et)")
         
-    # Sayfanın otomatik yenilenmesi için
+    # Sayfanın otomatik yenilenmesi (60 saniyede bir)
     time.sleep(60)
     st.rerun()
 
