@@ -30,12 +30,32 @@ PORTFOLIO = {
     "NAKİT": 42000.0
 }
 
-def format_tr(value):
+# --- FORMATLAMA FONKSİYONLARI ---
+def format_tr_money(value):
+    """Para birimi formatı: 1.234,56"""
+    if pd.isna(value) or value == "": return "-"
+    try:
+        val = float(value)
+        s = "{:,.2f}".format(val)
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
+    except: return str(value)
+
+def format_tr_nodigit(value):
+    """Kuruşsuz format: 1.234"""
     if pd.isna(value) or value == "": return "-"
     try:
         val = float(value)
         s = "{:,.0f}".format(val)
         return s.replace(",", "X").replace(".", ",").replace("X", ".")
+    except: return str(value)
+
+def format_tr_percent(value):
+    """Yüzde formatı: %12,34"""
+    if pd.isna(value) or value == "": return "-"
+    try:
+        val = float(value)
+        s = "{:,.2f}".format(val)
+        return "%" + s.replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
 @st.cache_data(ttl=60)
@@ -47,7 +67,6 @@ def load_data():
         client = gspread.authorize(creds)
         sheet = client.open(SHEET_NAME).sheet1
         
-        # Tüm veriyi ham olarak çek
         data = sheet.get_all_values()
         if len(data) < 2: return pd.DataFrame()
         
@@ -55,19 +74,13 @@ def load_data():
         rows = data[1:]
         df = pd.DataFrame(rows, columns=headers)
         
-        # --- ZORLA DÜZELTME MOTORU (Trilyon Hatası İçin) ---
         def fix_turkish_number(val):
             if val is None or val == "": return 0.0
             val = str(val).strip()
-            # "3.407,72" formatı için:
-            # 1. Noktayı sil (Binlik ayracı) -> "3407,72"
             val = val.replace(".", "")
-            # 2. Virgülü nokta yap (Ondalık) -> "3407.72"
             val = val.replace(",", ".")
-            try:
-                return float(val)
-            except:
-                return 0.0
+            try: return float(val)
+            except: return 0.0
 
         for col in df.columns:
             if col != "Tarih":
@@ -76,7 +89,6 @@ def load_data():
         df['Tarih'] = pd.to_datetime(df['Tarih'])
         return df
     except Exception as e:
-        st.error(f"Veri yüklenirken hata: {e}")
         return pd.DataFrame()
 
 def calculate_net_wealth_value(row, currency_rate=1.0):
@@ -146,7 +158,7 @@ def main():
         
         with st.sidebar:
             st.header("⚙️ Ayarlar")
-            st.write(f"💵 Dolar: **{format_tr(usd)} TL**")
+            st.write(f"💵 Dolar: **{format_tr_money(usd)} TL**")
             st.write(f"⚖️ Stopaj: **%{FON_VERGI_ORANI*100}**")
             if st.button("🔄 Yenile"):
                 st.cache_data.clear()
@@ -161,20 +173,33 @@ def main():
                 daily_chg, daily_pct = calculate_daily_change(df_csv, net_wealth, rate)
                 
                 c1, c2, c3 = st.columns([2, 1, 1])
-                c1.metric("🚀 TOPLAM SERVET", f"{currency} {format_tr(net_wealth)}", f"{format_tr(daily_pct)}% (24s)")
-                c2.metric("💰 Net Kâr", f"{currency} {format_tr(net_profit)}", delta_color="inverse")
-                c3.metric("📈 Genel Kâr Oranı", f"%{format_tr((net_profit/df_m['Toplam Maliyet'].sum()*100))}")
+                c1.metric("🚀 TOPLAM SERVET", f"{currency} {format_tr_money(net_wealth)}", f"{format_tr_percent(daily_pct)} (24s)")
+                c2.metric("💰 Net Kâr", f"{currency} {format_tr_money(net_profit)}", delta_color="inverse")
+                c3.metric("📈 Genel Kâr Oranı", f"{format_tr_percent((net_profit/df_m['Toplam Maliyet'].sum()*100))}")
                 st.divider()
                 
                 if currency == "TL":
                     prog = min(net_wealth / HEDEF_SERVET_TL, 1.0)
-                    st.subheader(f"🎯 Hedef: {format_tr(HEDEF_SERVET_TL)} TL")
+                    st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
                     st.progress(prog)
                     st.divider()
 
                 st.subheader("📋 Detaylı Varlık & Kâr Tablosu")
-                # Sade tablo (Renklendirme yok, hata riski yok)
-                st.dataframe(df_m.style.format({"Toplam Maliyet": format_tr, "Net Servet": format_tr, "Net Kâr": format_tr, "Vergi": format_tr, "Kâr Oranı (%)": lambda x: f"%{format_tr(x)}"}), use_container_width=True, hide_index=True)
+                
+                # --- TABLO FORMATLAMA AYARLARI ---
+                st.dataframe(
+                    df_m.style.format({
+                        "Toplam Maliyet": format_tr_money,  # 1.234,56
+                        "Brüt Değer": format_tr_nodigit,    # 1.234 (Kuruşsuz) - İSTEĞİN BU
+                        "Vergi": format_tr_money,           # 1.234,56
+                        "Net Servet": format_tr_money,      # 1.234,56
+                        "Net Kâr": format_tr_money,         # 1.234,56
+                        "Kâr Oranı (%)": format_tr_percent  # %12,34
+                    }), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+                
                 st.divider()
 
                 st.subheader(f"📈 Zamansal Servet Değişimi ({currency})")
