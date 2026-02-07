@@ -7,12 +7,18 @@ from datetime import datetime
 import re
 import random
 import os
+import sys
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
 MY_FUNDS = ["TLY", "DFI", "TP2"]
 
-HEADERS = [
+# CLOUD İÇİN ÖZEL: Zamanlayıcıyı GitHub Actions (YAML) dosyası yöneteceği için
+# Kodun içindeki saat kontrolünü kaldırıp "Her çalıştığında güncelle" moduna alıyoruz.
+# Böylece veri kaçırma şansı olmuyor.
+
+# --- SENİN BELİRLEDİĞİN SABİT SÜTUN SIRASI ---
+SUTUN_SIRASI = [
     "Tarih", 
     "DOLAR KURU",
     "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ",
@@ -29,67 +35,70 @@ USER_AGENTS = [
 ]
 
 def connect_to_sheet():
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    if os.path.exists('credentials.json'):
-        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-        client = gspread.authorize(creds)
-        sheet = client.open(SHEET_NAME).sheet1
-        return sheet
+    """Bağlantı koparsa 3 kere tekrar dener"""
+    retries = 3
+    for i in range(retries):
+        try:
+            scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+            # GitHub Actions, secret'tan credentials.json dosyasını oluşturmuş olacak
+            if os.path.exists('credentials.json'):
+                creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+                client = gspread.authorize(creds)
+                sheet = client.open(SHEET_NAME).sheet1
+                return sheet
+            else:
+                print("🔥 HATA: credentials.json bulunamadı!")
+                return None
+        except Exception as e:
+            print(f"⚠️ Bağlantı denemesi {i+1} başarısız: {e}")
+            time.sleep(5)
     return None
 
 def clean_currency(value_str):
-    """
-    Web'den gelen '1.234,56' veya '1,234.56' verisini
-    Python'un anlayacağı '1234.56' float formatına çevirir.
-    """
     if not value_str: return 0.0
-    s = str(value_str).strip()
+    value_str = str(value_str).strip()
+    match = re.search(r'([\d\.,]+)', value_str)
+    if not match: return 0.0
+    clean_str = match.group(1)
     
-    # İçinde sadece sayı ve noktalama işaretleri kalsın
-    s = re.sub(r'[^\d.,]', '', s)
-    
-    if not s: return 0.0
-    
-    # Son karakter bir noktalama işaretiyse sil (örn: 123.)
-    if s[-1] in ".,": s = s[:-1]
-    
-    # Nokta ve virgül analizi
-    if "," in s and "." in s:
-        # Hem nokta hem virgül varsa, sağdaki ondalıktır.
-        if s.rfind(",") > s.rfind("."): # Örn: 1.234,56 (TR)
-            s = s.replace(".", "").replace(",", ".")
-        else: # Örn: 1,234.56 (US)
-            s = s.replace(",", "")
-    elif "," in s:
-        # Sadece virgül var. 
-        # Eğer virgül sondan 3. karakterden önceyse binliktir (1,234) -> sil
-        # Eğer sondaysa ondalıktır (12,50) -> nokta yap
-        # Basit çözüm: TR siteleri genelde ondalık için virgül kullanır.
-        # Ama TEFAS bazen 6 haneli ondalık verir (3,123456).
-        s = s.replace(",", ".")
-    # Sadece nokta varsa (1.234) -> Python zaten anlar, dokunma.
-    
-    try:
-        return float(s)
-    except:
-        return 0.0
+    # 1.234,56 -> 1234.56 (Format temizleme)
+    if ',' in clean_str and '.' not in clean_str:
+        return float(clean_str.replace(',', '.'))
+    if ',' in clean_str and '.' in clean_str:
+        if clean_str.rfind(',') > clean_str.rfind('.'): 
+             return float(clean_str.replace('.', '').replace(',', '.'))
+        else:
+             return float(clean_str.replace(',', ''))
+    return float(clean_str)
 
 def get_last_known_from_sheet(sheet):
-    """Hafıza yükleme"""
+    """
+    HAFIZA FONKSİYONU:
+    Bot her açıldığında Google Sheets'teki son satırı okur.
+    Böylece bot kapalıyken kaydedilmiş son fon fiyatlarını hafızaya alır.
+    Sıfır yazma riskini ortadan kaldırır.
+    """
+    print("☁️ Google Sheets hafızası taranıyor...")
     memory = {}
     try:
         all_values = sheet.get_all_values()
-        if len(all_values) < 2: return {}
+        if len(all_values) < 2: return {} 
+        
         last_row = all_values[-1]
-        for i, h in enumerate(all_values[0]):
+        headers = all_values[0]
+        
+        for i, h in enumerate(headers):
             if "FİYAT" in h and i < len(last_row):
                 try:
-                    # Google Sheets virgüllü string döndürebilir, onu floata çevir
+                    # Sheet'ten gelen veriyi sayıya çevir
                     val_str = str(last_row[i]).replace(",", ".")
                     val = float(val_str)
-                    if val > 0: memory[h] = val
+                    if val > 0:
+                        memory[h] = val
+                        print(f"   💡 Hafızada: {h} = {val}")
                 except: pass
-    except: pass
+    except Exception as e:
+        print(f"⚠️ Hafıza okuma hatası: {e}")
     return memory
 
 def fetch_usd():
@@ -117,72 +126,106 @@ def fetch_gold():
                         data[f"{key} ALIŞ"] = clean_currency(cols[1].get_text())
                         data[f"{key} SATIŞ"] = clean_currency(cols[2].get_text())
         return data
-    except: return {}
+    except Exception as e:
+        print(f"⚠️ Altın Hatası: {e}")
+        return {}
 
 def fetch_fund_single(code):
     url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
     headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
     try:
-        time.sleep(1)
+        # Cloud'da çalıştığı için biraz daha hızlı olabilir, sleep'i kıstık ama kaldırmadık
+        time.sleep(1) 
         resp = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
         
-        # Seçici 1: Top list
         top_list = soup.find("ul", class_="top-list")
         if top_list:
             for li in top_list.find_all("li"):
                 if "Son Fiyat" in li.get_text():
                     return clean_currency(li.get_text().split("Fiyat")[-1])
-        # Seçici 2: Main indicators
-        item = soup.select_one(".main-indicators li:first-child span")
-        if item: return clean_currency(item.get_text())
         
+        item = soup.select_one(".top-list > li:nth-of-type(1) span:last-child")
+        if item: return clean_currency(item.get_text())
         return 0.0
     except: return 0.0
 
-def main():
-    print("🚀 BOT ÇALIŞIYOR...")
-    sheet = connect_to_sheet()
-    if not sheet: return
-
-    if not sheet.get_all_values():
-        sheet.append_row(HEADERS)
-
-    cached_funds = get_last_known_from_sheet(sheet)
+def update_all_funds(current_cache):
+    """
+    Fonları günceller. 
+    Eğer TEFAS'tan veri çekemezse (0 gelirse), HAFIZADAKİ ESKİ DEĞERİ KORUR.
+    Cloud Modu: Her çalıştığında güncellemeyi dener.
+    """
+    print("\n🌍 FON GÜNCELLEMESİ BAŞLADI (Cloud)...")
+    new_cache = current_cache.copy()
     
-    # Fonları güncelle
     for code in MY_FUNDS:
         key = f"{code} FİYAT"
+        # Her çalıştığında deniyoruz ki veri hep taze olsun
+        print(f"   ⏳ {code} aranıyor...", end=" ")
         price = fetch_fund_single(code)
+        
         if price > 0:
-            cached_funds[key] = price
-            print(f"✅ {code}: {price}")
+            new_cache[key] = price
+            print(f"✅ {price}")
         else:
-            old = cached_funds.get(key, 0)
-            print(f"❌ {code} çekilemedi, eski ({old}) kullanılıyor.")
+            old = new_cache.get(key, 0)
+            print(f"❌ Çekilemedi, Eski veri korunuyor: {old}")
+    
+    print("🌍 Tamamlandı.\n")
+    return new_cache
 
+def main():
+    print(f"🤖 CLOUD BOT BAŞLATILIYOR... (Hedef: {SHEET_NAME})")
+    
+    sheet = connect_to_sheet()
+    if not sheet:
+        print("🔥 Bağlantı kurulamadı, çıkılıyor.")
+        return
+
+    # Başlık yoksa ekle
+    if not sheet.get_all_values():
+        sheet.append_row(SUTUN_SIRASI)
+        print("📝 Tablo boştu, başlıklar eklendi.")
+
+    # 1. ADIM: HAFIZAYI YÜKLE (En önemlisi bu)
+    cached_funds = get_last_known_from_sheet(sheet)
+    
+    # 2. ADIM: FONLARI GÜNCELLE
+    # Cloud'da 'while' döngüsü olmadığı için, bot her uyandığında bir kez dener.
+    cached_funds = update_all_funds(cached_funds)
+    
+    # 3. ADIM: ALTIN VE DOLAR
     gold = fetch_gold()
     usd = fetch_usd()
     
+    # 4. ADIM: VERİYİ PAKETLE
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row_dict = {"Tarih": ts, "DOLAR KURU": usd}
     if gold: row_dict.update(gold)
+    
+    # Hafızadaki fon verilerini ekle (Yeni çekilenler veya eskiler)
     row_dict.update(cached_funds)
     
+    # 5. ADIM: YAZMA VE BİTİRME
     if gold:
+        # Sütun sırasına göre listeyi hazırla
         row_values = []
-        for col in HEADERS:
-            # Python float'ı stringe çevirmeden direkt listeye ekle
-            # Gspread bunu Google Sheets'e doğru formatta iletecek
+        for col in SUTUN_SIRASI:
             val = row_dict.get(col, 0.0)
             row_values.append(val)
         
         try:
-            # user_entered seçeneği Google'ın sayıyı otomatik tanımasını sağlar
+            # value_input_option='USER_ENTERED' -> Google'a "Bu sayıdır" demeyi zorlar
             sheet.append_row(row_values, value_input_option='USER_ENTERED')
-            print("✅ Kayıt Başarılı.")
+            
+            gram = row_dict.get('GRAM ALTIN ALIŞ', 0)
+            tp2 = row_dict.get('TP2 FİYAT', 0)
+            print(f"[{ts.split()[1]}] ✅ CLOUD KAYIT BAŞARILI. Gram: {gram} | TP2: {tp2}")
         except Exception as e:
             print(f"🔥 Yazma Hatası: {e}")
+            # Hata olsa bile döngü olmadığı için script burada biter
+            # Bir sonraki turda (15 dk sonra) tekrar dener.
 
 if __name__ == "__main__":
     main()
