@@ -185,16 +185,14 @@ def main():
                     st.divider()
 
                 st.subheader("📋 Detaylı Varlık & Kâr Tablosu")
-                
-                # --- TABLO FORMATLAMA AYARLARI ---
                 st.dataframe(
                     df_m.style.format({
-                        "Toplam Maliyet": format_tr_money,  # 1.234,56
-                        "Brüt Değer": format_tr_nodigit,    # 1.234 (Kuruşsuz) - İSTEĞİN BU
-                        "Vergi": format_tr_money,           # 1.234,56
-                        "Net Servet": format_tr_money,      # 1.234,56
-                        "Net Kâr": format_tr_money,         # 1.234,56
-                        "Kâr Oranı (%)": format_tr_percent  # %12,34
+                        "Toplam Maliyet": format_tr_money,
+                        "Brüt Değer": format_tr_nodigit,
+                        "Vergi": format_tr_money,
+                        "Net Servet": format_tr_money,
+                        "Net Kâr": format_tr_money,
+                        "Kâr Oranı (%)": format_tr_percent
                     }), 
                     use_container_width=True, 
                     hide_index=True
@@ -223,6 +221,58 @@ def main():
                     fig_b.add_trace(go.Bar(name='Net Servet', x=df_m['Varlık'], y=df_m['Net Servet'], marker_color='forestgreen'))
                     fig_b.update_layout(barmode='group')
                     st.plotly_chart(fig_b, use_container_width=True, key=f"b_{currency}_{uuid.uuid4()}")
+                
+                # --- YENİ BÖLÜM: ALTIN PİYASASI VE MAKAS ANALİZİ ---
+                st.divider()
+                st.subheader("🥇 Canlı Piyasa: Altın Alış-Satış ve Makas Analizi (TL)")
+                
+                gold_cols = st.columns(4)
+                # Gösterilecek altın tipleri ve veri anahtarları
+                gold_types = [
+                    ("Gram Altın", "GRAM ALTIN"),
+                    ("Ata Altın", "ATA ALTIN"),
+                    ("22 Ayar Bilezik", "22 AYAR ALTIN"),
+                    ("Çeyrek Altın", "ÇEYREK ALTIN")
+                ]
+
+                for i, (name, key_prefix) in enumerate(gold_types):
+                    # Verileri çek
+                    alis = last_row.get(f"{key_prefix} ALIŞ", 0) / rate
+                    satis = last_row.get(f"{key_prefix} SATIŞ", 0) / rate
+                    
+                    # Makas hesabı
+                    fark = satis - alis
+                    if satis > 0:
+                        yuzde_makas = (fark / satis) * 100
+                    else:
+                        yuzde_makas = 0
+                    
+                    with gold_cols[i]:
+                        # Özel tasarım kutucuk (CSS ile)
+                        st.markdown(f"""
+                        <div style="
+                            border: 1px solid #444; 
+                            border-radius: 8px; 
+                            padding: 10px; 
+                            background-color: #262730;
+                            text-align: center;">
+                            <h4 style="margin: 0; color: #FFD700;">{name}</h4>
+                            <div style="margin-top: 5px; font-size: 0.9em; color: #AAA;">Alış / Satış</div>
+                            <div style="font-size: 1.1em; font-weight: bold; margin: 5px 0;">
+                                {format_tr_money(alis)} / <span style="color:#4CAF50">{format_tr_money(satis)}</span>
+                            </div>
+                            <div style="
+                                background-color: #3e2723; 
+                                color: #ffab91; 
+                                border-radius: 4px; 
+                                padding: 2px 5px; 
+                                font-size: 0.85em;
+                                margin-top: 8px;">
+                                ✂ Makas: {format_tr_money(fark)} (%{yuzde_makas:.2f})
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
     else:
         st.info("☁️ Veri bekleniyor...")
     
