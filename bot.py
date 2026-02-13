@@ -11,11 +11,11 @@ import sys
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
-MY_FUNDS = ["TLY", "DFI", "TP2"]
+# GÜNCELLEME 1: Yeni fonları listeye ekledik
+MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
 
 # CLOUD İÇİN ÖZEL: Zamanlayıcıyı GitHub Actions (YAML) dosyası yöneteceği için
 # Kodun içindeki saat kontrolünü kaldırıp "Her çalıştığında güncelle" moduna alıyoruz.
-# Böylece veri kaçırma şansı olmuyor.
 
 # --- SENİN BELİRLEDİĞİN SABİT SÜTUN SIRASI ---
 SUTUN_SIRASI = [
@@ -26,7 +26,8 @@ SUTUN_SIRASI = [
     "ATA ALTIN ALIŞ", "ATA ALTIN SATIŞ",
     "ÇEYREK ALTIN ALIŞ", "ÇEYREK ALTIN SATIŞ",
     "ALTIN ONS ALIŞ", "ALTIN ONS SATIŞ",
-    "TLY FİYAT", "DFI FİYAT", "TP2 FİYAT"
+    "TLY FİYAT", "DFI FİYAT", "TP2 FİYAT",
+    "PHE FİYAT", "ROF FİYAT", "PBR FİYAT" # GÜNCELLEME 2: Yeni sütun başlıkları eklendi
 ]
 
 USER_AGENTS = [
@@ -40,7 +41,6 @@ def connect_to_sheet():
     for i in range(retries):
         try:
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-            # GitHub Actions, secret'tan credentials.json dosyasını oluşturmuş olacak
             if os.path.exists('credentials.json'):
                 creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
                 client = gspread.authorize(creds)
@@ -192,7 +192,6 @@ def main():
     cached_funds = get_last_known_from_sheet(sheet)
     
     # 2. ADIM: FONLARI GÜNCELLE
-    # Cloud'da 'while' döngüsü olmadığı için, bot her uyandığında bir kez dener.
     cached_funds = update_all_funds(cached_funds)
     
     # 3. ADIM: ALTIN VE DOLAR
@@ -224,8 +223,6 @@ def main():
             print(f"[{ts.split()[1]}] ✅ CLOUD KAYIT BAŞARILI. Gram: {gram} | TP2: {tp2}")
         except Exception as e:
             print(f"🔥 Yazma Hatası: {e}")
-            # Hata olsa bile döngü olmadığı için script burada biter
-            # Bir sonraki turda (15 dk sonra) tekrar dener.
 
 if __name__ == "__main__":
     main()
