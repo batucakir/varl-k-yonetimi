@@ -3,7 +3,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import requests
 from bs4 import BeautifulSoup
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import random
 import os
@@ -11,13 +11,8 @@ import sys
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
-# GÜNCELLEME 1: Yeni fonları listeye ekledik
 MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
 
-# CLOUD İÇİN ÖZEL: Zamanlayıcıyı GitHub Actions (YAML) dosyası yöneteceği için
-# Kodun içindeki saat kontrolünü kaldırıp "Her çalıştığında güncelle" moduna alıyoruz.
-
-# --- SENİN BELİRLEDİĞİN SABİT SÜTUN SIRASI ---
 SUTUN_SIRASI = [
     "Tarih", 
     "DOLAR KURU",
@@ -27,7 +22,7 @@ SUTUN_SIRASI = [
     "ÇEYREK ALTIN ALIŞ", "ÇEYREK ALTIN SATIŞ",
     "ALTIN ONS ALIŞ", "ALTIN ONS SATIŞ",
     "TLY FİYAT", "DFI FİYAT", "TP2 FİYAT",
-    "PHE FİYAT", "ROF FİYAT", "PBR FİYAT" # GÜNCELLEME 2: Yeni sütun başlıkları eklendi
+    "PHE FİYAT", "ROF FİYAT", "PBR FİYAT"
 ]
 
 USER_AGENTS = [
@@ -36,7 +31,6 @@ USER_AGENTS = [
 ]
 
 def connect_to_sheet():
-    """Bağlantı koparsa 3 kere tekrar dener"""
     retries = 3
     for i in range(retries):
         try:
@@ -60,45 +54,27 @@ def clean_currency(value_str):
     match = re.search(r'([\d\.,]+)', value_str)
     if not match: return 0.0
     clean_str = match.group(1)
-    
-    # 1.234,56 -> 1234.56 (Format temizleme)
-    if ',' in clean_str and '.' not in clean_str:
-        return float(clean_str.replace(',', '.'))
+    if ',' in clean_str and '.' not in clean_str: return float(clean_str.replace(',', '.'))
     if ',' in clean_str and '.' in clean_str:
-        if clean_str.rfind(',') > clean_str.rfind('.'): 
-             return float(clean_str.replace('.', '').replace(',', '.'))
-        else:
-             return float(clean_str.replace(',', ''))
+        if clean_str.rfind(',') > clean_str.rfind('.'): return float(clean_str.replace('.', '').replace(',', '.'))
+        else: return float(clean_str.replace(',', ''))
     return float(clean_str)
 
 def get_last_known_from_sheet(sheet):
-    """
-    HAFIZA FONKSİYONU:
-    Bot her açıldığında Google Sheets'teki son satırı okur.
-    Böylece bot kapalıyken kaydedilmiş son fon fiyatlarını hafızaya alır.
-    Sıfır yazma riskini ortadan kaldırır.
-    """
-    print("☁️ Google Sheets hafızası taranıyor...")
     memory = {}
     try:
         all_values = sheet.get_all_values()
         if len(all_values) < 2: return {} 
-        
         last_row = all_values[-1]
         headers = all_values[0]
-        
         for i, h in enumerate(headers):
             if "FİYAT" in h and i < len(last_row):
                 try:
-                    # Sheet'ten gelen veriyi sayıya çevir
                     val_str = str(last_row[i]).replace(",", ".")
                     val = float(val_str)
-                    if val > 0:
-                        memory[h] = val
-                        print(f"   💡 Hafızada: {h} = {val}")
+                    if val > 0: memory[h] = val
                 except: pass
-    except Exception as e:
-        print(f"⚠️ Hafıza okuma hatası: {e}")
+    except: pass
     return memory
 
 def fetch_usd():
@@ -126,101 +102,80 @@ def fetch_gold():
                         data[f"{key} ALIŞ"] = clean_currency(cols[1].get_text())
                         data[f"{key} SATIŞ"] = clean_currency(cols[2].get_text())
         return data
-    except Exception as e:
-        print(f"⚠️ Altın Hatası: {e}")
-        return {}
+    except: return {}
 
 def fetch_fund_single(code):
     url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
     headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
     try:
-        # Cloud'da çalıştığı için biraz daha hızlı olabilir, sleep'i kıstık ama kaldırmadık
         time.sleep(1) 
         resp = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
-        
         top_list = soup.find("ul", class_="top-list")
         if top_list:
             for li in top_list.find_all("li"):
                 if "Son Fiyat" in li.get_text():
                     return clean_currency(li.get_text().split("Fiyat")[-1])
-        
         item = soup.select_one(".top-list > li:nth-of-type(1) span:last-child")
         if item: return clean_currency(item.get_text())
         return 0.0
     except: return 0.0
 
 def update_all_funds(current_cache):
-    """
-    Fonları günceller. 
-    Eğer TEFAS'tan veri çekemezse (0 gelirse), HAFIZADAKİ ESKİ DEĞERİ KORUR.
-    Cloud Modu: Her çalıştığında güncellemeyi dener.
-    """
-    print("\n🌍 FON GÜNCELLEMESİ BAŞLADI (Cloud)...")
     new_cache = current_cache.copy()
-    
     for code in MY_FUNDS:
         key = f"{code} FİYAT"
-        # Her çalıştığında deniyoruz ki veri hep taze olsun
-        print(f"   ⏳ {code} aranıyor...", end=" ")
         price = fetch_fund_single(code)
-        
-        if price > 0:
-            new_cache[key] = price
-            print(f"✅ {price}")
+        if price > 0: new_cache[key] = price
         else:
             old = new_cache.get(key, 0)
-            print(f"❌ Çekilemedi, Eski veri korunuyor: {old}")
-    
-    print("🌍 Tamamlandı.\n")
+            print(f"❌ {code} çekilemedi, eski ({old}) kullanılıyor.")
     return new_cache
 
 def main():
-    print(f"🤖 CLOUD BOT BAŞLATILIYOR... (Hedef: {SHEET_NAME})")
+    # --- AKILLI ZAMANLAMA KONTROLÜ ---
+    # Türkiye Saati (UTC+3)
+    tr_now = datetime.utcnow() + timedelta(hours=3)
+    hour = tr_now.hour
+    minute = tr_now.minute
+    weekday = tr_now.weekday() # 0=Pzt, 6=Pazar
+
+    is_weekend = (weekday >= 5) # Cumartesi veya Pazar
+    is_work_hours = (9 <= hour <= 19) # 09:00 - 19:00 arası
+    
+    # KURAL: Eğer (Hafta sonuysa VEYA Mesai dışındaysa) VE (Dakika 05'ten büyükse) -> ÇALIŞMA
+    # Yani sadece saat başlarında (xx:00 - xx:05 arası) çalışsın.
+    # Mesai saatlerinde ise her zaman çalışsın.
+    
+    if (is_weekend or not is_work_hours):
+        if minute > 5:
+            print(f"💤 Uyku Modu: {tr_now.strftime('%H:%M')} (Piyasa kapalı, sadece saat başı çalışır)")
+            return
+
+    print(f"🤖 BOT ÇALIŞIYOR... (Saat: {tr_now.strftime('%H:%M')})")
     
     sheet = connect_to_sheet()
-    if not sheet:
-        print("🔥 Bağlantı kurulamadı, çıkılıyor.")
-        return
+    if not sheet: return
 
-    # Başlık yoksa ekle
-    if not sheet.get_all_values():
-        sheet.append_row(SUTUN_SIRASI)
-        print("📝 Tablo boştu, başlıklar eklendi.")
+    if not sheet.get_all_values(): sheet.append_row(SUTUN_SIRASI)
 
-    # 1. ADIM: HAFIZAYI YÜKLE (En önemlisi bu)
     cached_funds = get_last_known_from_sheet(sheet)
-    
-    # 2. ADIM: FONLARI GÜNCELLE
     cached_funds = update_all_funds(cached_funds)
-    
-    # 3. ADIM: ALTIN VE DOLAR
     gold = fetch_gold()
     usd = fetch_usd()
     
-    # 4. ADIM: VERİYİ PAKETLE
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = tr_now.strftime("%Y-%m-%d %H:%M:%S")
     row_dict = {"Tarih": ts, "DOLAR KURU": usd}
     if gold: row_dict.update(gold)
-    
-    # Hafızadaki fon verilerini ekle (Yeni çekilenler veya eskiler)
     row_dict.update(cached_funds)
     
-    # 5. ADIM: YAZMA VE BİTİRME
     if gold:
-        # Sütun sırasına göre listeyi hazırla
         row_values = []
         for col in SUTUN_SIRASI:
-            val = row_dict.get(col, 0.0)
-            row_values.append(val)
-        
+            row_values.append(row_dict.get(col, 0.0))
         try:
-            # value_input_option='USER_ENTERED' -> Google'a "Bu sayıdır" demeyi zorlar
             sheet.append_row(row_values, value_input_option='USER_ENTERED')
-            
-            gram = row_dict.get('GRAM ALTIN ALIŞ', 0)
-            tp2 = row_dict.get('TP2 FİYAT', 0)
-            print(f"[{ts.split()[1]}] ✅ CLOUD KAYIT BAŞARILI. Gram: {gram} | TP2: {tp2}")
+            print(f"✅ KAYIT BAŞARILI.")
         except Exception as e:
             print(f"🔥 Yazma Hatası: {e}")
 
