@@ -17,7 +17,7 @@ HEDEF_SERVET_TL = 2000000
 HEDEF_TARIH = datetime(2026, 2, 28)
 FON_VERGI_ORANI = 0.175
 
-# VARLIK EŞLEŞTİRME
+# VARLIK EŞLEŞTİRME (Görünen İsim -> Bot Fiyat Anahtarı)
 ASSET_MAPPING = {
     "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
     "ATA ALTIN (Adet)": "ATA ALTIN ALIŞ",
@@ -25,6 +25,9 @@ ASSET_MAPPING = {
     "TLY FONU": "TLY FİYAT",
     "DFI FONU": "DFI FİYAT",
     "TP2 FONU": "TP2 FİYAT",
+    "PHE FONU": "PHE FİYAT",
+    "ROF FONU": "ROF FİYAT",
+    "PBR FONU": "PBR FİYAT",
     "TL Bakiye": "NAKİT" 
 }
 
@@ -47,14 +50,19 @@ def format_tr_percent(value):
         return f"{arrow} %" + "{:,.2f}".format(abs(val)).replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
+# --- GOOGLE SHEETS BAĞLANTISI ---
+def get_google_sheet_client():
+    credentials_dict = st.secrets["gcp_service_account"]
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+    client = gspread.authorize(creds)
+    return client
+
 # --- VERİ ÇEKME ---
 @st.cache_data(ttl=60)
 def load_data():
     try:
-        credentials_dict = st.secrets["gcp_service_account"]
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
-        client = gspread.authorize(creds)
+        client = get_google_sheet_client()
         sheet = client.open(SHEET_NAME)
         
         # Fiyatlar
@@ -89,7 +97,28 @@ def load_data():
     except:
         return pd.DataFrame(), pd.DataFrame()
 
-# --- GÜNCEL PORTFÖYÜ HESAPLA (BUGÜN İÇİN - TABLO İÇİN) ---
+# --- YENİ İŞLEM KAYDETME (SHEET'E YAZMA) ---
+def save_transaction(date_obj, tur, varlik, islem, adet, fiyat):
+    try:
+        client = get_google_sheet_client()
+        sheet = client.open(SHEET_NAME)
+        ws = sheet.worksheet("Islemler")
+        
+        # Tarih formatı: DD.MM.YYYY
+        date_str = date_obj.strftime("%d.%m.%Y")
+        # Sayı formatı: Google Sheets virgül sever (TR Locale) ama kodda nokta kullanıyoruz.
+        # En temizi string olarak göndermek.
+        row = [date_str, tur, varlik, islem, str(adet).replace(".", ","), str(fiyat).replace(".", ",")]
+        
+        ws.append_row(row, value_input_option='USER_ENTERED')
+        st.success(f"✅ İşlem Başarıyla Eklendi: {varlik} ({islem})")
+        time.sleep(1)
+        st.cache_data.clear()
+        st.rerun()
+    except Exception as e:
+        st.error(f"Kayıt Hatası: {e}")
+
+# --- GÜNCEL PORTFÖYÜ HESAPLA ---
 def calculate_current_portfolio(df_trans):
     portfolio = {} 
     if df_trans.empty: return portfolio
@@ -113,69 +142,48 @@ def calculate_current_portfolio(df_trans):
             else: curr["adet"] -= adet
     return portfolio
 
-# --- YENİ GRAFİK MOTORU: ZAMAN MAKİNESİ ---
+# --- GRAFİK MOTORU: ZAMAN MAKİNESİ ---
 def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
-    """
-    Her tarih için o tarihe kadar yapılmış işlemleri toplar ve o anki cüzdanı oluşturur.
-    Sonra o anki cüzdanı o anki fiyatla çarpar.
-    """
     if df_prices.empty: return pd.DataFrame()
-    
-    # Verileri tarihe göre sırala
     df_prices = df_prices.sort_values("Tarih").reset_index(drop=True)
-    
     if not df_trans.empty:
         df_trans = df_trans.sort_values("Tarih").reset_index(drop=True)
     
     trend_data = []
-    
-    # "Yürüyen" Cüzdan (Her adımda güncellenecek)
     running_portfolio = {} 
-    
     trans_idx = 0
     total_trans = len(df_trans)
     
-    # Tüm fiyat geçmişini dön
+    # Son 3000 veriyi al (Hız için)
+    # Ancak cüzdan bakiyesini baştan sona hesaplamalıyız, o yüzden full loop.
+    
     for _, price_row in df_prices.iterrows():
         current_date = price_row['Tarih']
-        
-        # Bu tarihe kadar olan işlemleri işle
         while trans_idx < total_trans:
             trans_row = df_trans.iloc[trans_idx]
             trans_date = trans_row['Tarih']
-            
             if trans_date <= current_date:
                 varlik = trans_row['Varlık']
                 islem = str(trans_row['İşlem']).upper().strip()
                 adet = float(trans_row['Adet'])
-                
                 curr_qty = running_portfolio.get(varlik, 0.0)
-                
-                if islem == "ALIS":
-                    running_portfolio[varlik] = curr_qty + adet
-                elif islem == "SATIS":
-                    running_portfolio[varlik] = curr_qty - adet
-                
+                if islem == "ALIS": running_portfolio[varlik] = curr_qty + adet
+                elif islem == "SATIS": running_portfolio[varlik] = curr_qty - adet
                 trans_idx += 1
-            else:
-                break # Sıradaki işlem gelecekte
+            else: break 
         
-        # O anki cüzdanla o anki fiyatları çarp
-        total_wealth_at_moment = 0
+        total_wealth = 0
         for varlik_adi, adet in running_portfolio.items():
             if adet <= 0: continue
-            
             price_key = ASSET_MAPPING.get(varlik_adi)
             if not price_key: continue
-            
             price = 1.0 if price_key == "NAKİT" else price_row.get(price_key, 0)
-            total_wealth_at_moment += (adet * price)
-            
-        trend_data.append({"Tarih": current_date, "Toplam Servet": total_wealth_at_moment / rate})
+            total_wealth += (adet * price)
+        trend_data.append({"Tarih": current_date, "Toplam Servet": total_wealth / rate})
         
     return pd.DataFrame(trend_data)
 
-# --- PERFORMANS VE GEÇMİŞ KIYASLAMA ---
+# --- PERFORMANS ---
 def get_historical_price(df_prices, col_name, days_ago):
     if df_prices.empty or col_name not in df_prices.columns: return 0
     target_date = datetime.now() - timedelta(days=days_ago)
@@ -190,12 +198,10 @@ def calculate_asset_performance(df_prices, portfolio, rate=1.0):
     performance_data = []
     if df_prices.empty: return pd.DataFrame()
     last_row = df_prices.iloc[-1]
-    
     for varlik, stats in portfolio.items():
         if stats["adet"] <= 0: continue
         price_key = ASSET_MAPPING.get(varlik)
         if not price_key or price_key == "NAKİT": continue
-        
         current_price = last_row.get(price_key, 0)
         if current_price == 0: continue
         
@@ -204,22 +210,16 @@ def calculate_asset_performance(df_prices, portfolio, rate=1.0):
         p_1m = get_historical_price(df_prices, price_key, 30)
         p_6m = get_historical_price(df_prices, price_key, 180)
         
-        def calc_pct(old, new):
-            return ((new - old) / old * 100) if old > 0 else 0
-
+        def calc_pct(old, new): return ((new - old) / old * 100) if old > 0 else 0
         row = {
-            "Varlık": varlik,
-            "Anlık Fiyat": current_price / rate,
-            "1 Gün (%)": calc_pct(p_1d, current_price),
-            "1 Hafta (%)": calc_pct(p_1w, current_price),
-            "1 Ay (%)": calc_pct(p_1m, current_price),
-            "6 Ay (%)": calc_pct(p_6m, current_price)
+            "Varlık": varlik, "Anlık Fiyat": current_price / rate,
+            "1 Gün (%)": calc_pct(p_1d, current_price), "1 Hafta (%)": calc_pct(p_1w, current_price),
+            "1 Ay (%)": calc_pct(p_1m, current_price), "6 Ay (%)": calc_pct(p_6m, current_price)
         }
         performance_data.append(row)
     return pd.DataFrame(performance_data)
 
 def calculate_wealth_at_snapshot(row_prices, portfolio_holdings, rate=1.0):
-    """Sadece 'anlık' veya tek bir satır için detaylı hesaplama"""
     total = 0
     for varlik_adi, stats in portfolio_holdings.items():
         adet = stats["adet"]
@@ -243,8 +243,6 @@ def main():
         last_prices = df_prices.iloc[-1]
         usd = last_prices.get("DOLAR KURU", 1.0)
         if usd == 0: usd = 1.0
-        
-        # GÜNCEL PORTFÖYÜ HESAPLA (Tablolar için)
         portfolio = calculate_current_portfolio(df_trans)
         
         with st.sidebar:
@@ -253,12 +251,32 @@ def main():
             if st.button("🔄 Yenile"):
                 st.cache_data.clear()
                 st.rerun()
+            
+            st.divider()
+            
+            # --- YENİ İŞLEM EKLEME MODÜLÜ ---
+            with st.expander("➕ Yeni İşlem Ekle", expanded=False):
+                with st.form("transaction_form"):
+                    f_date = st.date_input("Tarih", datetime.now())
+                    f_tur = st.selectbox("Tür", ["ALTIN", "FON", "NAKİT", "DÖVİZ"])
+                    # Varlık listesini Asset Mapping'den çekiyoruz
+                    asset_options = list(ASSET_MAPPING.keys())
+                    f_varlik = st.selectbox("Varlık", asset_options)
+                    f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
+                    f_adet = st.number_input("Adet", min_value=0.0, step=0.01, format="%.2f")
+                    f_fiyat = st.number_input("Birim Fiyat (TL)", min_value=0.0, step=0.01, format="%.2f")
+                    
+                    submitted = st.form_submit_button("💾 Kaydet")
+                    if submitted:
+                        if f_adet > 0 and f_fiyat > 0:
+                            save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
+                        else:
+                            st.warning("Adet ve Fiyat 0'dan büyük olmalı.")
 
         tab_tl, tab_usd = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
         
         for tab, currency, rate in [(tab_tl, "TL", 1.0), (tab_usd, "$", usd)]:
             with tab:
-                # --- ANA HESAPLAMALAR ---
                 rows = []
                 for varlik, stats in portfolio.items():
                     adet = stats["adet"]
@@ -287,20 +305,17 @@ def main():
                     profit_ratio = (tot_profit / tot_cost * 100) if tot_cost > 0 else 0
                     
                     if len(df_prices) > 1:
-                        prev_prices = df_prices.iloc[-2]
-                        prev_wealth = calculate_wealth_at_snapshot(prev_prices, portfolio, rate)
-                        daily_diff_val = tot_wealth - prev_wealth
-                        daily_diff_pct = (daily_diff_val / prev_wealth * 100) if prev_wealth > 0 else 0
-                    else: daily_diff_pct = 0
+                        prev_wealth = calculate_wealth_at_snapshot(df_prices.iloc[-2], portfolio, rate)
+                        diff_val = tot_wealth - prev_wealth
+                        diff_pct = (diff_val / prev_wealth * 100) if prev_wealth > 0 else 0
+                    else: diff_pct = 0
 
-                    # 1. METRİKLER
                     c1, c2, c3 = st.columns([2, 1, 1])
                     c1.metric("🚀 TOPLAM PORTFÖY (NET)", f"{currency} {format_tr_money(tot_wealth)}", f"Vergi: -{currency}{format_tr_money(tot_tax)}", delta_color="inverse")
-                    c2.metric("💰 Net Kâr", f"{currency} {format_tr_money(tot_profit)}", f"{format_tr_percent(daily_diff_pct)} (Son Kayıt)", delta_color="normal")
+                    c2.metric("💰 Net Kâr", f"{currency} {format_tr_money(tot_profit)}", f"{format_tr_percent(diff_pct)} (Son Kayıt)", delta_color="normal")
                     c3.metric("📈 Genel Kâr Oranı", f"{format_tr_percent(profit_ratio)}")
                     st.divider()
 
-                    # 2. HEDEF
                     if currency == "TL":
                         prog = min(tot_wealth / HEDEF_SERVET_TL, 1.0)
                         kalan = HEDEF_SERVET_TL - tot_wealth
@@ -313,7 +328,6 @@ def main():
                         h2.caption(f"⏳ Bitiş: **28 Şubat 2026** ({days} gün kaldı)")
                         st.divider()
 
-                    # 3. ANA TABLO
                     st.subheader("📋 Detaylı Varlık Tablosu")
                     df_view["Kâr Oranı (%)"] = df_view.apply(lambda x: (x["Net Kâr"]/x["Toplam Maliyet"]*100) if x["Toplam Maliyet"]>0 else 0, axis=1)
                     st.dataframe(df_view.style.format({
@@ -323,20 +337,13 @@ def main():
                     }), use_container_width=True, hide_index=True)
                     st.divider()
 
-                    # 4. GRAFİKLER (ZAMAN MAKİNESİ MODU - GÜNCELLENDİ)
                     st.subheader(f"📈 Gerçek Tarihsel Servet Değişimi ({currency})")
                     df_trend = prepare_true_historical_trend(df_prices, df_trans, rate)
-                    
                     if not df_trend.empty:
                         min_y = df_trend["Toplam Servet"].min() * 0.999
                         max_y = df_trend["Toplam Servet"].max() * 1.001
-                        
                         fig_t = px.area(df_trend, x="Tarih", y="Toplam Servet", line_shape='spline')
-                        fig_t.update_layout(
-                            xaxis_title=None, yaxis_title=None, height=400, 
-                            hovermode="x unified", showlegend=False,
-                            yaxis_range=[min_y, max_y]
-                        )
+                        fig_t.update_layout(xaxis_title=None, yaxis_title=None, height=400, hovermode="x unified", showlegend=False, yaxis_range=[min_y, max_y])
                         fig_t.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                         st.plotly_chart(fig_t, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                     st.divider()
@@ -355,19 +362,13 @@ def main():
                         st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{currency}_{uuid.uuid4()}")
                     st.divider()
                     
-                    # 5. PERFORMANS KARNESİ
                     st.subheader("📊 Varlık Performans Karnesi (Geçmişe Kıyasla Değişim)")
                     df_perf = calculate_asset_performance(df_prices, portfolio, rate)
                     if not df_perf.empty:
                          st.dataframe(df_perf.style.format({
-                            "Anlık Fiyat": format_tr_money,
-                            "1 Gün (%)": format_tr_percent,
-                            "1 Hafta (%)": format_tr_percent,
-                            "1 Ay (%)": format_tr_percent,
-                            "6 Ay (%)": format_tr_percent
+                            "Anlık Fiyat": format_tr_money, "1 Gün (%)": format_tr_percent, "1 Hafta (%)": format_tr_percent, "1 Ay (%)": format_tr_percent, "6 Ay (%)": format_tr_percent
                         }), use_container_width=True, hide_index=True)
                     
-                    # 6. ALTIN MAKAS
                     st.divider()
                     st.subheader("🥇 Altın Makas Analizi")
                     gold_cols = st.columns(4)
