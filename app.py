@@ -256,9 +256,16 @@ def main():
         page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"])
         st.divider()
         if not df_prices.empty:
-            usd = df_prices.iloc[-1].get("DOLAR KURU", 1.0)
-            st.metric("Dolar Kuru", f"{usd:.2f} TL")
-        else: usd = 1.0
+            last = df_prices.iloc[-1]
+            usd = last.get("DOLAR KURU", 1.0)
+            eur = last.get("EURO KURU", 1.0)
+            if eur == 0: eur = 1.0 # Hata önleyici
+            
+            c1, c2 = st.columns(2)
+            c1.metric("USD", f"{usd:.2f} TL")
+            c2.metric("EUR", f"{eur:.2f} TL")
+        else: usd = 1.0; eur = 1.0
+        
         if st.button("🔄 Yenile"): st.cache_data.clear(); st.rerun()
         with st.expander("➕ İşlem Ekle"):
             with st.form("add"):
@@ -281,9 +288,18 @@ def main():
         if not df_trans.empty and not df_prices.empty:
             df_view, tot_wealth, tot_tax = calculate_portfolio(df_trans, df_prices)
             
-            tab1, tab2 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
-            for t, curr, rate in [(tab1, "TL", 1.0), (tab2, "$", usd)]:
-                with t:
+            # --- 3 TABLI YAPI (TL / USD / EUR) ---
+            tab1, tab2, tab3 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
+            
+            currencies = [("TL", 1.0), ("USD", usd), ("EUR", eur)]
+            
+            for i, (curr, rate) in enumerate(currencies):
+                # Doğru tabı seç
+                if i == 0: current_tab = tab1
+                elif i == 1: current_tab = tab2
+                else: current_tab = tab3
+                
+                with current_tab:
                     if not df_view.empty:
                         net_profit = df_view["Net Kâr"].sum()
                         cost = df_view["Maliyet"].sum()
@@ -315,9 +331,7 @@ def main():
                         for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi"]: df_show[c] = df_show[c] / rate
                         df_show["Kâr %"] = df_show.apply(lambda x: x["Net Kâr"]/x["Maliyet"]*100 if x["Maliyet"]>0 else 0, axis=1)
                         st.dataframe(df_show.style.format({
-                            "Adet": "{:,.0f}", 
-                            "Fiyat": "{:,.6f}",  # 6 digit
-                            "Maliyet": "{:,.2f}",
+                            "Adet": "{:,.0f}", "Fiyat": "{:,.6f}", "Maliyet": "{:,.2f}",
                             "Net Değer": "{:,.2f}", "Net Kâr": "{:,.2f}", "Vergi": "{:,.2f}", "Kâr %": "%{:,.2f}"
                         }), use_container_width=True, hide_index=True)
                         st.divider()
@@ -363,14 +377,11 @@ def main():
         if not df_prices.empty:
             
             market_data = []
-            
-            # --- ZAMAN DİLİMLERİ ---
             intervals = {
                 "10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360,
                 "1 Gün": 1440, "3 Gün": 4320, "1 Hafta": 10080, "2 Hafta": 20160,
                 "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600
             }
-            
             cols = list(df_prices.columns)
             for col in cols:
                 if col == "Tarih": continue
@@ -378,36 +389,26 @@ def main():
                     clean_name = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "")
                     series = df_prices[col]
                     current_price = series.iloc[-1]
-                    
                     rsi = 50.0
                     try: rsi = calculate_rsi(series).iloc[-1]
                     except: pass
-                    
                     row_data = {
-                        "Enstrüman": clean_name,
-                        "Fiyat": current_price,
-                        "RSI": rsi,
+                        "Enstrüman": clean_name, "Fiyat": current_price, "RSI": rsi,
                         "Trend": series.tail(30).tolist()
                     }
-                    
                     for label, mins in intervals.items():
                         row_data[label] = get_pct_change(df_prices, col, mins)
-                        
                     market_data.append(row_data)
             
             df_m = pd.DataFrame(market_data)
-            
-            # --- SEKMELER ---
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
             
-            # Dinamik Konfigürasyon
             col_config = {
                 "Enstrüman": st.column_config.TextColumn("Varlık", width="small"),
                 "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.6f TL"),
                 "RSI": st.column_config.NumberColumn("RSI", format="%.0f"),
                 "Trend": st.column_config.LineChartColumn("Trend (30 Veri)", y_min=0, width="small"),
             }
-            
             for label in intervals.keys():
                 col_config[label] = st.column_config.NumberColumn(label, format="%.2f %%")
 
@@ -415,18 +416,13 @@ def main():
                 if keyword == "Hisse": 
                     df_show = df_m[df_m["Enstrüman"].str.contains(".IS", na=False)]
                 elif keyword == "Fon": 
-                    # Fonlar için kısa vadeli değişimler anlamsız, onları gizleyelim
                     df_show = df_m[df_m["Enstrüman"].apply(lambda x: len(str(x))<=4 and "." not in str(x))]
-                    # Fonlarda anlık değişimleri göstermeyelim
                     display_cols = ["Enstrüman", "Fiyat", "RSI", "Trend"] + [k for k in intervals.keys() if "Dk" not in k and "Saat" not in k]
                     df_show = df_show[display_cols]
                 else: 
                     df_show = df_m[df_m["Enstrüman"].str.contains("ALTIN|DOLAR", na=False)]
 
-                if df_show.empty:
-                    st.info("Veri yok.")
-                    return
-                
+                if df_show.empty: st.info("Veri yok."); return
                 st.dataframe(df_show, column_config=col_config, use_container_width=True, hide_index=True)
 
             with t1: show_detailed_table("Hisse")
