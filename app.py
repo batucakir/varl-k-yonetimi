@@ -8,8 +8,8 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import numpy as np
 
-# --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+# --- SAYFA AYARLARI (GENİŞ MOD) ---
+st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="collapsed")
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
@@ -64,9 +64,10 @@ def load_data():
             
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             
-            # Smart Fill (0'ları önceki değerle doldur)
+            # SMART FILL (0 KORUMASI)
             df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
             
+            # Son satır bozuksa at
             if not df_prices.empty:
                 if df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                     df_prices = df_prices.iloc[:-1]
@@ -96,7 +97,30 @@ def load_data():
         return df_prices, df_trans, watchlist
     except: return pd.DataFrame(), pd.DataFrame(), []
 
-# --- MAPPING & FİYAT BULUCU ---
+# --- ANALİZ MOTORU (DETAYLI) ---
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def get_pct_change(df, col, minutes):
+    """Dakika bazlı değişim hesaplar"""
+    if df.empty: return 0.0
+    current_price = df.iloc[-1][col]
+    target_time = df.iloc[-1]['Tarih'] - timedelta(minutes=minutes)
+    
+    # Hedef zamana en yakın satır
+    closest_row = df.iloc[(df['Tarih'] - target_time).abs().argsort()[:1]]
+    if closest_row.empty: return 0.0
+    
+    old_price = closest_row.iloc[0][col]
+    if old_price == 0: return 0.0
+    
+    return (current_price - old_price) / old_price
+
+# --- MAPPING ---
 def create_asset_mapping(watchlist):
     mapping = {
         "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
@@ -144,7 +168,7 @@ def calculate_portfolio(df_trans, df_prices):
 
     table_rows = []
     total_wealth = 0
-    total_tax = 0 # Vergi Toplamı Eklendi
+    total_tax = 0
 
     for v, d in port.items():
         if d["adet"] <= 0.001: continue
@@ -168,6 +192,7 @@ def calculate_portfolio(df_trans, df_prices):
 
     return pd.DataFrame(table_rows), total_wealth, total_tax
 
+# --- GRAFİK ---
 def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
     if df_prices.empty: return pd.DataFrame()
     trend_data = []
@@ -265,7 +290,6 @@ def main():
     if page == "Portföyüm":
         st.markdown("<h2 style='text-align: center;'>💎 Varlık Portföyü</h2>", unsafe_allow_html=True)
         if not df_trans.empty and not df_prices.empty:
-            # Hesaplamada tot_tax artık geliyor
             df_view, tot_wealth, tot_tax = calculate_portfolio(df_trans, df_prices)
             
             tab1, tab2 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
@@ -275,7 +299,6 @@ def main():
                         net_profit = df_view["Net Kâr"].sum()
                         cost = df_view["Maliyet"].sum()
                         ratio = (net_profit / cost * 100) if cost > 0 else 0
-                        
                         df_trend = prepare_historical_trend(df_prices, df_trans, ASSET_MAPPING, rate)
                         diff_pct = 0
                         if len(df_trend) > 1:
@@ -284,13 +307,7 @@ def main():
                             diff_pct = (curr_val - prev_val) / prev_val * 100
                         
                         c1, c2, c3 = st.columns(3)
-                        # Vergi Bilgisi Geri Geldi!
-                        c1.metric(
-                            "Toplam Varlık (Net)", 
-                            f"{format_tr_money(tot_wealth/rate)} {curr}", 
-                            f"Vergi: -{format_tr_money(tot_tax/rate)} {curr}", 
-                            delta_color="inverse"
-                        )
+                        c1.metric("Toplam Varlık", f"{format_tr_money(tot_wealth/rate)} {curr}", f"Vergi: -{format_tr_money(tot_tax/rate)} {curr}", delta_color="inverse")
                         c2.metric("Net Kâr", f"{format_tr_money(net_profit/rate)} {curr}", f"{format_tr_percent(diff_pct)} (Son Değişim)")
                         c3.metric("Kâr Oranı", f"%{format_tr_money(ratio)}")
                         st.divider()
@@ -349,52 +366,97 @@ def main():
                             pct_m = makas/satis*100 if satis>0 else 0
                             gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{pct_m:.2f})", delta_color="inverse")
 
-    # --- SAYFA 2: PİYASA TAKİP ---
+    # --- SAYFA 2: PİYASA TAKİP (ULTRA DETAY) ---
     elif page == "Piyasa Takip":
-        st.markdown("## 🌍 Piyasa İzleme")
+        st.markdown("## 🌍 Detaylı Piyasa Analizi")
         if not df_prices.empty:
-            last = df_prices.iloc[-1]
-            prev = df_prices.iloc[-2] if len(df_prices)>1 else last
             
-            hisseler, fonlar, emtia = [], [], []
+            market_data = []
             
-            for col in df_prices.columns:
+            # Zaman aralıkları (Dakika cinsinden)
+            intervals = {
+                "10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360,
+                "1 Gün": 1440, "3 Gün": 4320, "1 Hafta": 10080, "2 Hafta": 20160,
+                "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600
+            }
+            
+            cols = list(df_prices.columns)
+            for col in cols:
                 if col == "Tarih": continue
                 if "FİYAT" in col or "ALTIN" in col or "DOLAR" in col:
-                    name = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "")
-                    price = last[col]
-                    old = prev[col]
+                    # Temel Veriler
+                    clean_name = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "")
+                    series = df_prices[col]
+                    current_price = series.iloc[-1]
                     
-                    diff = 0
-                    if old > 0 and price > 0: diff = (price - old) / old
+                    # RSI
+                    rsi = 50.0
+                    try: rsi = calculate_rsi(series).iloc[-1]
+                    except: pass
                     
-                    item = {"Enstrüman": name, "Fiyat": price, "Değişim": diff}
+                    # Veri Satırı Oluştur
+                    row_data = {
+                        "Enstrüman": clean_name,
+                        "Fiyat": current_price,
+                        "RSI": rsi,
+                        "Trend": series.tail(30).tolist() # Sparkline için
+                    }
                     
-                    if ".IS" in col: hisseler.append(item)
-                    elif "ALTIN" in col or "DOLAR" in col: emtia.append(item)
-                    elif len(col) <= 12: fonlar.append(item)
+                    # Tüm Zaman Dilimlerini Hesapla
+                    for label, mins in intervals.items():
+                        row_data[label] = get_pct_change(df_prices, col, mins)
+                        
+                    market_data.append(row_data)
             
+            df_m = pd.DataFrame(market_data)
+            
+            # --- TABLO AYARLARI ---
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
             
-            def show_table(data):
-                if not data: 
-                    st.info("Veri yok.")
-                    return
-                df = pd.DataFrame(data)
-                st.dataframe(
-                    df,
-                    column_config={
-                        "Enstrüman": st.column_config.TextColumn("Varlık", width="medium"),
-                        "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.2f TL"),
-                        "Değişim": st.column_config.NumberColumn("Günlük %", format="%.2f %%")
-                    },
-                    use_container_width=True,
-                    hide_index=True
+            # Dinamik Sütun Konfigürasyonu
+            col_config = {
+                "Enstrüman": st.column_config.TextColumn("Varlık", width="small", fixed=True),
+                "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.2f TL", fixed=True),
+                "RSI": st.column_config.NumberColumn("RSI", format="%.0f"),
+                "Trend": st.column_config.LineChartColumn("Trend (30 Veri)", y_min=0, width="small"),
+            }
+            
+            # Tüm zaman dilimleri için konfigürasyon ekle
+            for label in intervals.keys():
+                col_config[label] = st.column_config.NumberColumn(
+                    label, 
+                    format="%.2f %%",
+                    help=f"{label} önceki fiyata göre değişim"
                 )
 
-            with t1: show_table(hisseler)
-            with t2: show_table(fonlar)
-            with t3: show_table(emtia)
+            def show_detailed_table(keyword):
+                if keyword == "Hisse": filt = [x for x in market_data if ".IS" in x["Enstrüman"] or "Hisse" in x.get("Türü", "")] # Basit filtre
+                elif keyword == "Fon": filt = [x for x in market_data if len(x["Enstrüman"]) <= 4 and "." not in x["Enstrüman"]]
+                else: filt = [x for x in market_data if "ALTIN" in x["Enstrüman"] or "DOLAR" in x["Enstrüman"]]
+                
+                # Pandas ile filtreleme daha kolay
+                df_show = df_m[df_m["Enstrüman"].apply(lambda x: ".IS" in x if keyword=="Hisse" else ("ALTIN" in x or "DOLAR" in x) if keyword=="Emtia" else (len(x)<=10 and "." not in x and "ALTIN" not in x))]
+                
+                if df_show.empty:
+                    st.info("Veri yok.")
+                    return
+
+                # RENKLENDİRME (Dataframe içinde gösterim için style yerine column_config kullanıyoruz)
+                # Streamlit şimdilik hücre bazlı arka plan rengini native desteklemiyor (Pandas Styler hariç).
+                # Ancak Pandas Styler interaktifliği kısıtlıyor.
+                # Bu yüzden ok işaretleri ve native formatting kullanıyoruz.
+                
+                st.dataframe(
+                    df_show,
+                    column_config=col_config,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=(len(df_show) * 35) + 38
+                )
+
+            with t1: show_detailed_table("Hisse")
+            with t2: show_detailed_table("Fon")
+            with t3: show_detailed_table("Emtia")
 
 if __name__ == "__main__":
     main()
