@@ -17,7 +17,7 @@ HEDEF_SERVET_TL = 2000000
 HEDEF_TARIH = datetime(2026, 2, 28)
 FON_VERGI_ORANI = 0.175
 
-# VARLIK EŞLEŞTİRME (Görünen İsim -> Bot Fiyat Anahtarı)
+# VARLIK EŞLEŞTİRME
 ASSET_MAPPING = {
     "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
     "ATA ALTIN (Adet)": "ATA ALTIN ALIŞ",
@@ -65,7 +65,6 @@ def load_data():
         client = get_google_sheet_client()
         sheet = client.open(SHEET_NAME)
         
-        # Fiyatlar
         ws_prices = sheet.worksheet("PortfoyVerileri")
         data_prices = ws_prices.get_all_values()
         if len(data_prices) > 1:
@@ -78,7 +77,6 @@ def load_data():
         else:
             df_prices = pd.DataFrame()
 
-        # İşlemler
         try:
             ws_trans = sheet.worksheet("Islemler")
             data_trans = ws_trans.get_all_values()
@@ -86,7 +84,6 @@ def load_data():
                 df_trans = pd.DataFrame(data_trans[1:], columns=data_trans[0])
                 df_trans['Adet'] = pd.to_numeric(df_trans['Adet'].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
                 df_trans['Fiyat'] = pd.to_numeric(df_trans['Fiyat'].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
-                # Tarih formatını garantiye al
                 df_trans['Tarih'] = pd.to_datetime(df_trans['Tarih'], dayfirst=True)
             else:
                 df_trans = pd.DataFrame()
@@ -97,19 +94,14 @@ def load_data():
     except:
         return pd.DataFrame(), pd.DataFrame()
 
-# --- YENİ İŞLEM KAYDETME (SHEET'E YAZMA) ---
+# --- YENİ İŞLEM KAYDETME ---
 def save_transaction(date_obj, tur, varlik, islem, adet, fiyat):
     try:
         client = get_google_sheet_client()
         sheet = client.open(SHEET_NAME)
         ws = sheet.worksheet("Islemler")
-        
-        # Tarih formatı: DD.MM.YYYY
         date_str = date_obj.strftime("%d.%m.%Y")
-        # Sayı formatı: Google Sheets virgül sever (TR Locale) ama kodda nokta kullanıyoruz.
-        # En temizi string olarak göndermek.
         row = [date_str, tur, varlik, islem, str(adet).replace(".", ","), str(fiyat).replace(".", ",")]
-        
         ws.append_row(row, value_input_option='USER_ENTERED')
         st.success(f"✅ İşlem Başarıyla Eklendi: {varlik} ({islem})")
         time.sleep(1)
@@ -142,7 +134,7 @@ def calculate_current_portfolio(df_trans):
             else: curr["adet"] -= adet
     return portfolio
 
-# --- GRAFİK MOTORU: ZAMAN MAKİNESİ ---
+# --- ZAMAN MAKİNESİ (GRAFİK İÇİN) ---
 def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
     if df_prices.empty: return pd.DataFrame()
     df_prices = df_prices.sort_values("Tarih").reset_index(drop=True)
@@ -153,9 +145,6 @@ def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
     running_portfolio = {} 
     trans_idx = 0
     total_trans = len(df_trans)
-    
-    # Son 3000 veriyi al (Hız için)
-    # Ancak cüzdan bakiyesini baştan sona hesaplamalıyız, o yüzden full loop.
     
     for _, price_row in df_prices.iterrows():
         current_date = price_row['Tarih']
@@ -183,7 +172,7 @@ def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
         
     return pd.DataFrame(trend_data)
 
-# --- PERFORMANS ---
+# --- PERFORMANS VE ANLIK ---
 def get_historical_price(df_prices, col_name, days_ago):
     if df_prices.empty or col_name not in df_prices.columns: return 0
     target_date = datetime.now() - timedelta(days=days_ago)
@@ -204,12 +193,10 @@ def calculate_asset_performance(df_prices, portfolio, rate=1.0):
         if not price_key or price_key == "NAKİT": continue
         current_price = last_row.get(price_key, 0)
         if current_price == 0: continue
-        
         p_1d = get_historical_price(df_prices, price_key, 1)
         p_1w = get_historical_price(df_prices, price_key, 7)
         p_1m = get_historical_price(df_prices, price_key, 30)
         p_6m = get_historical_price(df_prices, price_key, 180)
-        
         def calc_pct(old, new): return ((new - old) / old * 100) if old > 0 else 0
         row = {
             "Varlık": varlik, "Anlık Fiyat": current_price / rate,
@@ -251,27 +238,21 @@ def main():
             if st.button("🔄 Yenile"):
                 st.cache_data.clear()
                 st.rerun()
-            
             st.divider()
-            
-            # --- YENİ İŞLEM EKLEME MODÜLÜ ---
             with st.expander("➕ Yeni İşlem Ekle", expanded=False):
                 with st.form("transaction_form"):
                     f_date = st.date_input("Tarih", datetime.now())
                     f_tur = st.selectbox("Tür", ["ALTIN", "FON", "NAKİT", "DÖVİZ"])
-                    # Varlık listesini Asset Mapping'den çekiyoruz
                     asset_options = list(ASSET_MAPPING.keys())
                     f_varlik = st.selectbox("Varlık", asset_options)
                     f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
                     f_adet = st.number_input("Adet", min_value=0.0, step=0.01, format="%.2f")
                     f_fiyat = st.number_input("Birim Fiyat (TL)", min_value=0.0, step=0.01, format="%.2f")
-                    
                     submitted = st.form_submit_button("💾 Kaydet")
                     if submitted:
                         if f_adet > 0 and f_fiyat > 0:
                             save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
-                        else:
-                            st.warning("Adet ve Fiyat 0'dan büyük olmalı.")
+                        else: st.warning("Adet ve Fiyat 0'dan büyük olmalı.")
 
         tab_tl, tab_usd = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
         
@@ -303,7 +284,6 @@ def main():
                     tot_profit = df_view["Net Kâr"].sum()
                     tot_cost = df_view["Toplam Maliyet"].sum()
                     profit_ratio = (tot_profit / tot_cost * 100) if tot_cost > 0 else 0
-                    
                     if len(df_prices) > 1:
                         prev_wealth = calculate_wealth_at_snapshot(df_prices.iloc[-2], portfolio, rate)
                         diff_val = tot_wealth - prev_wealth
@@ -337,23 +317,47 @@ def main():
                     }), use_container_width=True, hide_index=True)
                     st.divider()
 
+                    # --- YENİ GRAFİK SİSTEMİ ---
                     st.subheader(f"📈 Gerçek Tarihsel Servet Değişimi ({currency})")
                     df_trend = prepare_true_historical_trend(df_prices, df_trans, rate)
                     if not df_trend.empty:
+                        # Grafik türünü Çizgi (Line) yaptık ve Zoom Slider ekledik
+                        fig_t = px.line(df_trend, x="Tarih", y="Toplam Servet")
+                        
+                        # Y Ekseni Ayarı: 0'dan değil, en düşük değerden başlasın
                         min_y = df_trend["Toplam Servet"].min() * 0.999
                         max_y = df_trend["Toplam Servet"].max() * 1.001
-                        fig_t = px.area(df_trend, x="Tarih", y="Toplam Servet", line_shape='spline')
-                        fig_t.update_layout(xaxis_title=None, yaxis_title=None, height=400, hovermode="x unified", showlegend=False, yaxis_range=[min_y, max_y])
-                        fig_t.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
+                        
+                        fig_t.update_layout(
+                            xaxis_title=None, 
+                            yaxis_title=None, 
+                            height=450, 
+                            hovermode="x unified", 
+                            showlegend=False, 
+                            yaxis_range=[min_y, max_y]
+                        )
+                        # Zoom Slider Ekledik
+                        fig_t.update_xaxes(rangeslider_visible=True)
+                        fig_t.update_traces(line_color='#2E8B57', line_width=2)
                         st.plotly_chart(fig_t, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                     st.divider()
 
+                    # --- YENİ PASTA GRAFİĞİ SEÇİCİSİ ---
                     g1, g2 = st.columns(2)
                     with g1:
                         st.subheader("Varlık Dağılımı")
-                        fig_p = px.pie(df_view, values='Net Servet', names='Grup', hole=0.5, color='Grup', color_discrete_map={'ALTIN':'#FFD700', 'FON':'#4169E1', 'NAKİT':'#90EE90'})
-                        fig_p.update_traces(textinfo='percent+label', textfont_size=16)
+                        # Seçenek Kutusu Ekledik
+                        dagilim_tipi = st.radio("Görünüm Modu:", ["Ana Gruplar (Altın/Fon/Nakit)", "Detaylı Varlıklar"], horizontal=True, key=f"rad_{currency}")
+                        
+                        if dagilim_tipi == "Ana Gruplar (Altın/Fon/Nakit)":
+                            col_name = 'Grup'
+                        else:
+                            col_name = 'Varlık'
+                            
+                        fig_p = px.pie(df_view, values='Net Servet', names=col_name, hole=0.5)
+                        fig_p.update_traces(textinfo='percent+label', textfont_size=14)
                         st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{currency}_{uuid.uuid4()}")
+                        
                     with g2:
                         st.subheader("Kâr/Zarar")
                         fig_b = go.Figure()
