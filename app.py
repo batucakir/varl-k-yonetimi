@@ -168,7 +168,10 @@ def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
             if not price_key: continue
             price = 1.0 if price_key == "NAKİT" else price_row.get(price_key, 0)
             total_wealth += (adet * price)
-        trend_data.append({"Tarih": current_date, "Toplam Servet": total_wealth / rate})
+        
+        # Sadece 0'dan büyük değerleri al (Grafiği bozmamak için)
+        if total_wealth > 0:
+            trend_data.append({"Tarih": current_date, "Toplam Servet": total_wealth / rate})
         
     return pd.DataFrame(trend_data)
 
@@ -317,14 +320,14 @@ def main():
                     }), use_container_width=True, hide_index=True)
                     st.divider()
 
-                    # --- YENİ GRAFİK SİSTEMİ ---
+                    # --- GÜNCELLENMİŞ GRAFİK (AREA + ZOOM) ---
                     st.subheader(f"📈 Gerçek Tarihsel Servet Değişimi ({currency})")
                     df_trend = prepare_true_historical_trend(df_prices, df_trans, rate)
                     if not df_trend.empty:
-                        # Grafik türünü Çizgi (Line) yaptık ve Zoom Slider ekledik
-                        fig_t = px.line(df_trend, x="Tarih", y="Toplam Servet")
+                        # Tekrar Area Chart'a döndük (Dolgun görünüm)
+                        fig_t = px.area(df_trend, x="Tarih", y="Toplam Servet")
                         
-                        # Y Ekseni Ayarı: 0'dan değil, en düşük değerden başlasın
+                        # Y Ekseni: En düşük değerden başlasın (Zoom etkisi)
                         min_y = df_trend["Toplam Servet"].min() * 0.999
                         max_y = df_trend["Toplam Servet"].max() * 1.001
                         
@@ -334,28 +337,42 @@ def main():
                             height=450, 
                             hovermode="x unified", 
                             showlegend=False, 
-                            yaxis_range=[min_y, max_y]
+                            yaxis_range=[min_y, max_y] # Kritik ayar burası
                         )
-                        # Zoom Slider Ekledik
-                        fig_t.update_xaxes(rangeslider_visible=True)
-                        fig_t.update_traces(line_color='#2E8B57', line_width=2)
+                        # Range slider'ı kaldırdık (grafiği inceltiyor), mouse zoom'u yeterli
+                        fig_t.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                         st.plotly_chart(fig_t, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                     st.divider()
 
-                    # --- YENİ PASTA GRAFİĞİ SEÇİCİSİ ---
+                    # --- GÜNCELLENMİŞ PASTA GRAFİĞİ (TÜRKÇE FORMAT & BOLD) ---
                     g1, g2 = st.columns(2)
                     with g1:
                         st.subheader("Varlık Dağılımı")
-                        # Seçenek Kutusu Ekledik
                         dagilim_tipi = st.radio("Görünüm Modu:", ["Ana Gruplar (Altın/Fon/Nakit)", "Detaylı Varlıklar"], horizontal=True, key=f"rad_{currency}")
                         
-                        if dagilim_tipi == "Ana Gruplar (Altın/Fon/Nakit)":
-                            col_name = 'Grup'
-                        else:
-                            col_name = 'Varlık'
-                            
-                        fig_p = px.pie(df_view, values='Net Servet', names=col_name, hole=0.5)
-                        fig_p.update_traces(textinfo='percent+label', textfont_size=14)
+                        if dagilim_tipi == "Ana Gruplar (Altın/Fon/Nakit)": col_name = 'Grup'
+                        else: col_name = 'Varlık'
+                        
+                        # Veriyi gruplayıp yüzdeleri hesaplayalım (Etiket için)
+                        df_pie = df_view.groupby(col_name)["Net Servet"].sum().reset_index()
+                        total_pie = df_pie["Net Servet"].sum()
+                        df_pie["Yuzde"] = (df_pie["Net Servet"] / total_pie * 100)
+                        
+                        # Özel Türkçe Etiket Oluşturma (Lambda fonksiyonu ile)
+                        # Örnek Çıktı: "ALTIN<br>%35,20" (Kalın ve virgüllü)
+                        df_pie["Etiket"] = df_pie.apply(
+                            lambda x: f"<b>{x[col_name]}</b><br>%{str(f'{x.Yuzde:.2f}').replace('.', ',')}", 
+                            axis=1
+                        )
+
+                        fig_p = px.pie(df_pie, values='Net Servet', names=col_name, hole=0.5)
+                        
+                        # Plotly'e "Bizim oluşturduğumuz 'Etiket' sütununu kullan" diyoruz
+                        fig_p.update_traces(
+                            text=df_pie["Etiket"],
+                            textinfo='text',  # Otomatik hesaplama yerine bizim text'i kullan
+                            textfont_size=17, # Daha büyük yazı
+                        )
                         st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{currency}_{uuid.uuid4()}")
                         
                     with g2:
