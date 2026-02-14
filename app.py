@@ -6,6 +6,7 @@ import time
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
+import numpy as np
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
@@ -54,23 +55,21 @@ def load_data():
         data_prices = ws_prices.get_all_values()
         if len(data_prices) > 1:
             df_prices = pd.DataFrame(data_prices[1:], columns=data_prices[0])
-            df_prices.columns = df_prices.columns.str.strip() # Boşluk temizliği
+            df_prices.columns = df_prices.columns.str.strip()
             
             for col in df_prices.columns:
                 if col != "Tarih":
-                    # Virgülleri noktaya çevirip sayı yap
                     df_prices[col] = df_prices[col].astype(str).str.replace(",", ".")
-                    df_prices[col] = pd.to_numeric(df_prices[col], errors='coerce').fillna(0)
+                    df_prices[col] = pd.to_numeric(df_prices[col], errors='coerce') # Hata varsa NaN yap
             
-            # Tarih formatı (Hata önleyici)
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             
-            # Eğer son satır tamamen 0 veya boşsa, onu at (Botun yazma anına denk gelirse diye)
-            if not df_prices.empty:
-                last_idx = df_prices.index[-1]
-                # Dolar kuru 0 ise o satır bozuktur
-                if df_prices.loc[last_idx, "DOLAR KURU"] == 0:
-                    df_prices = df_prices.iloc[:-1]
+            # --- CRITICAL FIX: SMART FILL (BOŞLUK DOLDURMA) ---
+            # Eğer bir satırda fiyat 0 veya NaN ise, bir önceki satırdaki fiyatı al.
+            # Bu işlem grafikteki ani düşüşleri engeller.
+            df_prices = df_prices.replace(0, np.nan) # 0'ları NaN yap
+            df_prices = df_prices.ffill() # Yukarıdan aşağıya boşlukları doldur
+            df_prices = df_prices.fillna(0) # Hala boş kalan varsa (en başlar) 0 yap
 
         else: df_prices = pd.DataFrame()
 
@@ -83,6 +82,7 @@ def load_data():
                 df_trans.columns = df_trans.columns.str.strip()
                 df_trans['Adet'] = pd.to_numeric(df_trans['Adet'].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
                 df_trans['Fiyat'] = pd.to_numeric(df_trans['Fiyat'].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
+                df_trans['Tarih'] = pd.to_datetime(df_trans['Tarih'], dayfirst=True)
             else: df_trans = pd.DataFrame()
         except: df_trans = pd.DataFrame()
 
@@ -96,40 +96,29 @@ def load_data():
         return df_prices, df_trans, watchlist
     except: return pd.DataFrame(), pd.DataFrame(), []
 
-# --- AKILLI FİYAT BULUCU (FUZZY MATCH) ---
-def find_smart_price(row, asset_name):
-    """
-    Sütun adlarında asset_name'i arar.
-    Örn: 'TLY FONU' için 'TLY FİYAT' sütununu bulur.
-    """
-    if asset_name == "TL Bakiye": return 1.0
-    
-    # İsimden gereksizleri at
-    search_term = asset_name.replace(" FONU", "").replace(" (Adet)", "").replace(" (Gr)", "").replace(" (Hisse)", "").strip()
-    
-    # Altınlar için özel
-    gold_map = {
-        "22 AYAR BİLEZİK": "22 AYAR ALTIN ALIŞ",
-        "ATA ALTIN": "ATA ALTIN ALIŞ",
-        "ÇEYREK ALTIN": "ÇEYREK ALTIN ALIŞ"
+# --- MAPPING ---
+def create_asset_mapping(watchlist):
+    mapping = {
+        "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
+        "ATA ALTIN (Adet)": "ATA ALTIN ALIŞ",
+        "ÇEYREK ALTIN (Adet)": "ÇEYREK ALTIN ALIŞ",
+        "TL Bakiye": "NAKİT"
     }
-    if search_term in gold_map:
-        col = gold_map[search_term]
-        return row.get(col, 0)
+    for f in MY_FUNDS:
+        mapping[f"{f} FONU"] = f"{f} FİYAT"
 
-    # Genel Arama (Hisse/Fon)
-    for col in row.index:
-        if search_term in col:
-            # Eşleşme bulundu, değeri döndür
-            return row[col]
-            
-    return 0.0
+    for item in watchlist:
+        if ".IS" in item:
+            clean_name = item.replace(".IS", "")
+            mapping[f"{clean_name} (Hisse)"] = f"{item} FİYAT"
+    return mapping
 
 # --- HESAPLAMA ---
-def calculate_portfolio(df_trans, df_prices):
+def calculate_portfolio(df_trans, df_prices, mapping):
     port = {}
+    # Artık son satırda boşluk yok (ffill yaptık), güvenle alabiliriz
     last_prices = df_prices.iloc[-1] if not df_prices.empty else {}
-    
+
     for _, row in df_trans.iterrows():
         varlik = str(row['Varlık']).strip()
         islem = str(row['İşlem']).upper().strip()
@@ -154,12 +143,20 @@ def calculate_portfolio(df_trans, df_prices):
     for v, d in port.items():
         if d["adet"] <= 0.001: continue
         
-        # Akıllı Fiyat Kullan
-        curr_price = find_smart_price(last_prices, v)
-        
-        # Eğer fiyat 0 ise (Bot hatası vs), 1 önceki satıra bak
-        if curr_price == 0 and len(df_prices) > 1:
-             curr_price = find_smart_price(df_prices.iloc[-2], v)
+        pk = mapping.get(v)
+        if not pk: 
+            curr_price = 0
+        elif pk == "NAKİT":
+            curr_price = 1.0
+        else:
+            # Akıllı eşleşme (Sütun adında ara)
+            found = False
+            for col in last_prices.index:
+                if pk in col:
+                    curr_price = last_prices[col]
+                    found = True
+                    break
+            if not found: curr_price = 0
 
         guncel_deger = d["adet"] * curr_price
         vergi = 0
@@ -179,28 +176,23 @@ def calculate_portfolio(df_trans, df_prices):
     return pd.DataFrame(table_rows), total_wealth
 
 # --- GRAFİK VERİSİ ---
-def prepare_historical_trend(df_prices, df_trans, rate=1.0):
+def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
     if df_prices.empty: return pd.DataFrame()
+    
+    # Veri zaten ffill yapıldığı için 0 sorunu yok
+    df_prices = df_prices.sort_values("Tarih")
     
     trend_data = []
     running_port = {}
     trans_idx = 0
-    
-    # Tarihe göre sırala
-    df_prices = df_prices.sort_values("Tarih")
     df_trans = df_trans.sort_values("Tarih") if not df_trans.empty else df_trans
     
     for _, price_row in df_prices.iterrows():
         curr_date = price_row['Tarih']
-        
-        # O tarihe kadar olan işlemleri işle
         while trans_idx < len(df_trans):
-            # Trans tarihi string olabilir, onu da parse edelim garanti olsun
-            try:
-                trans_date = pd.to_datetime(df_trans.iloc[trans_idx]['Tarih'], dayfirst=True)
-            except:
-                trans_date = curr_date # Hata varsa o anki tarih say
-                
+            try: trans_date = df_trans.iloc[trans_idx]['Tarih']
+            except: trans_date = curr_date
+            
             if trans_date <= curr_date:
                 tr = df_trans.iloc[trans_idx]
                 var = str(tr['Varlık']).strip()
@@ -215,11 +207,61 @@ def prepare_historical_trend(df_prices, df_trans, rate=1.0):
         tot = 0
         for v, qty in running_port.items():
             if qty <= 0: continue
-            p = find_smart_price(price_row, v)
+            
+            # Fiyat Bulma
+            p = 0
+            pk = asset_map.get(v)
+            if pk == "NAKİT": p = 1.0
+            elif pk:
+                for col in price_row.index:
+                    if pk in col:
+                        p = price_row[col]
+                        break
             tot += (qty * p)
         
         if tot > 0: trend_data.append({"Tarih": curr_date, "Toplam Servet": tot/rate})
     return pd.DataFrame(trend_data)
+
+def get_historical_price(df_prices, key_part, days_ago):
+    if df_prices.empty: return 0
+    target = datetime.now() - timedelta(days=days_ago)
+    row = df_prices.iloc[(df_prices['Tarih'] - target).abs().argsort()[:1]]
+    
+    if row.empty: return 0
+    
+    # Sütun bul
+    for col in row.columns:
+        if key_part in col:
+            return row.iloc[0][col]
+    return 0
+
+def calculate_performance_table(df_prices, portfolio_df, asset_map, rate=1.0):
+    data = []
+    if df_prices.empty or portfolio_df.empty: return pd.DataFrame()
+    last = df_prices.iloc[-1]
+    
+    for index, row in portfolio_df.iterrows():
+        varlik = row["Varlık"]
+        pk = asset_map.get(varlik)
+        if not pk or pk == "NAKİT": continue
+        
+        # Güncel fiyat
+        curr_p = 0
+        for col in last.index:
+            if pk in col: curr_p = last[col]; break
+            
+        p1 = get_historical_price(df_prices, pk, 1)
+        p7 = get_historical_price(df_prices, pk, 7)
+        p30 = get_historical_price(df_prices, pk, 30)
+        p180 = get_historical_price(df_prices, pk, 180)
+        
+        def pct(old, new): return ((new - old) / old * 100) if old > 0 else 0
+        data.append({
+            "Varlık": varlik, "Anlık Fiyat": curr_p/rate,
+            "1 Gün": pct(p1, curr_p), "1 Hafta": pct(p7, curr_p),
+            "1 Ay": pct(p30, curr_p), "6 Ay": pct(p180, curr_p)
+        })
+    return pd.DataFrame(data)
 
 # --- İŞLEMLER ---
 def save_transaction(date_obj, tur, varlik, islem, adet, fiyat):
@@ -254,6 +296,7 @@ def add_to_watchlist_sheet(symbol):
 # --- UYGULAMA ---
 def main():
     df_prices, df_trans, watchlist = load_data()
+    ASSET_MAPPING = create_asset_mapping(watchlist)
     
     with st.sidebar:
         st.title("💎 Varlık Paneli")
@@ -273,9 +316,8 @@ def main():
             with st.form("add"):
                 f_date = st.date_input("Tarih", datetime.now())
                 f_tur = st.selectbox("Tür", ["ALTIN", "FON", "HİSSE", "NAKİT", "DÖVİZ"])
-                # Basit liste
-                default_assets = ["TLY FONU", "DFI FONU", "TL Bakiye", "22 AYAR BİLEZİK (Gr)", "ATA ALTIN (Adet)"]
-                f_varlik = st.selectbox("Varlık", default_assets + [x for x in watchlist])
+                default_assets = ["TLY FONU", "DFI FONU", "TP2 FONU", "TL Bakiye", "22 AYAR BİLEZİK (Gr)", "ATA ALTIN (Adet)"]
+                f_varlik = st.selectbox("Varlık", default_assets + [x + " (Hisse)" for x in watchlist if ".IS" in x])
                 f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
                 f_adet = st.number_input("Adet", min_value=0.0, step=0.01)
                 f_fiyat = st.number_input("Fiyat", min_value=0.0, step=0.01)
@@ -291,38 +333,40 @@ def main():
     if page == "Portföyüm":
         st.markdown("<h2 style='text-align: center;'>💎 Varlık Portföyü</h2>", unsafe_allow_html=True)
         if not df_trans.empty and not df_prices.empty:
-            df_view, tot_wealth = calculate_portfolio(df_trans, df_prices)
+            df_view, tot_wealth = calculate_portfolio(df_trans, df_prices, ASSET_MAPPING)
             
             tab1, tab2 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
             for t, curr, rate in [(tab1, "TL", 1.0), (tab2, "$", usd)]:
                 with t:
                     if not df_view.empty:
-                        # KPI
                         net_profit = df_view["Net Kâr"].sum()
                         cost = df_view["Maliyet"].sum()
                         ratio = (net_profit / cost * 100) if cost > 0 else 0
                         
+                        df_trend = prepare_historical_trend(df_prices, df_trans, ASSET_MAPPING, rate)
+                        diff_pct = 0
+                        if len(df_trend) > 1:
+                            curr_val = df_trend.iloc[-1]["Toplam Servet"]
+                            prev_val = df_trend.iloc[-2]["Toplam Servet"]
+                            diff_pct = (curr_val - prev_val) / prev_val * 100
+                        
                         c1, c2, c3 = st.columns(3)
                         c1.metric("Toplam Varlık", f"{format_tr_money(tot_wealth/rate)} {curr}")
-                        c2.metric("Net Kâr", f"{format_tr_money(net_profit/rate)} {curr}")
+                        c2.metric("Net Kâr", f"{format_tr_money(net_profit/rate)} {curr}", f"{format_tr_percent(diff_pct)} (Son Değişim)")
                         c3.metric("Kâr Oranı", f"%{format_tr_money(ratio)}")
                         st.divider()
                         
-                        # --- HEDEF (GERİ GELDİ!) ---
                         if curr == "TL":
                             prog = min(tot_wealth/HEDEF_SERVET_TL, 1.0)
                             kalan = HEDEF_SERVET_TL - tot_wealth
                             gun_kaldi = (HEDEF_TARIH - datetime.now()).days
-                            
                             st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
                             st.progress(prog)
-                            
                             h1, h2 = st.columns(2)
-                            h1.caption(f"🏁 Kalan Tutar: **{format_tr_money(kalan)} TL**")
-                            h2.caption(f"⏳ Kalan Süre: **{gun_kaldi} Gün** ({HEDEF_TARIH.strftime('%d.%m.%Y')})")
+                            h1.caption(f"🏁 Kalan: **{format_tr_money(kalan)} TL**")
+                            h2.caption(f"⏳ Bitiş: **{HEDEF_TARIH.strftime('%d.%m.%Y')}** ({gun_kaldi} Gün)")
                             st.divider()
                             
-                        # Tablo
                         st.subheader("📋 Varlık Detayı")
                         df_show = df_view.copy()
                         for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr"]: 
@@ -335,9 +379,7 @@ def main():
                         }), use_container_width=True, hide_index=True)
                         st.divider()
                         
-                        # Grafik
                         st.subheader("📈 Servet Değişimi")
-                        df_trend = prepare_historical_trend(df_prices, df_trans, rate)
                         if not df_trend.empty:
                             fig = px.area(df_trend, x="Tarih", y="Toplam Servet")
                             min_y = df_trend["Toplam Servet"].min() * 0.999
@@ -349,10 +391,8 @@ def main():
                         c1, c2 = st.columns(2)
                         with c1:
                             st.subheader("Dağılım")
-                            # Radio Buton Geri Geldi
                             grp_mode = st.radio("Görünüm", ["Ana Gruplar", "Detaylı"], horizontal=True, key=f"rad_{curr}")
                             grp_col = "Grup" if grp_mode == "Ana Gruplar" else "Varlık"
-                            
                             df_pie = df_view.groupby(grp_col)["Net Değer"].sum().reset_index()
                             total_p = df_pie["Net Değer"].sum()
                             df_pie["Etiket"] = df_pie.apply(lambda x: f"<b>{x[grp_col]}</b><br>%{x['Net Değer']/total_p*100:.2f}", axis=1)
@@ -366,7 +406,6 @@ def main():
                             fig_b.add_trace(go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer'], marker_color='forestgreen'))
                             st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{curr}")
                         
-                        # Altın Makas
                         st.subheader("🥇 Altın Makas")
                         last_p = df_prices.iloc[-1]
                         gold_cols = st.columns(4)
