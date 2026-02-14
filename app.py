@@ -41,16 +41,15 @@ HEDEF_TARIH = datetime(2026, 2, 28)
 FON_VERGI_ORANI = 0.175
 MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
 
-# --- SAYI TEMİZLEME MOTORU (V77 KRİTİK) ---
+# --- KRİTİK SAYI TEMİZLEME MOTORU (V78) ---
 def clean_numeric(value):
-    """Her türlü formatı (731,50 veya 1.200,50) saf float'a çevirir"""
     if pd.isna(value) or value == "" or value is None: return 0.0
     s = str(value).strip()
     if not s: return 0.0
-    # Eğer hem nokta hem virgül varsa (Örn: 1.250,50)
+    # TRHOL Fix: Eğer binlik nokta ve ondalık virgül varsa (1.250,50)
     if "." in s and "," in s:
         s = s.replace(".", "").replace(",", ".")
-    # Eğer sadece virgül varsa ve bu ondalıksa (Örn: 731,50)
+    # Sadece virgül varsa (731,50)
     elif "," in s:
         s = s.replace(",", ".")
     try:
@@ -60,7 +59,7 @@ def clean_numeric(value):
 
 # --- FORMATLAMA ---
 def format_tr_money(value):
-    if pd.isna(value) or value == 0: return "-"
+    if pd.isna(value) or value == "" or value == 0: return "-"
     try: return "{:,.2f}".format(float(value)).replace(",", "X").replace(".", ",").replace("X", ".")
     except: return str(value)
 
@@ -88,12 +87,10 @@ def load_data():
         if len(data_prices) > 1:
             df_prices = pd.DataFrame(data_prices[1:], columns=data_prices[0])
             df_prices.columns = df_prices.columns.str.strip()
-            
-            # Sayısal sütunları temizle
+            # Fiyatları temizle
             for col in df_prices.columns:
                 if col != "Tarih":
                     df_prices[col] = df_prices[col].apply(clean_numeric)
-            
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             df_prices = df_prices.dropna(subset=['Tarih']).sort_values("Tarih")
             df_prices = df_prices.replace(0, np.nan).ffill().bfill().fillna(0)
@@ -132,28 +129,10 @@ def get_pct_change(df, col, minutes):
     if df.empty or len(df) < 2: return 0.0
     current_price = float(df.iloc[-1][col])
     target_time = df.iloc[-1]['Tarih'] - timedelta(minutes=minutes)
-    
-    # Geçmişteki en yakın veriyi bul
     past_df = df[df['Tarih'] <= target_time]
-    if past_df.empty: 
-        old_price = float(df.iloc[0][col])
-    else:
-        old_price = float(past_df.iloc[-1][col])
-        
+    old_price = float(past_df.iloc[-1][col]) if not past_df.empty else float(df.iloc[0][col])
     if old_price == 0: return 0.0
-    # MATEMATİKSEL KESİN FORMÜL: ((Son - İlk) / İlk)
     return (current_price - old_price) / old_price
-
-@st.cache_data(ttl=3600)
-def get_bist_data(start_date):
-    try:
-        df_bist = yf.download("XU100.IS", start=start_date, progress=False)
-        if not df_bist.empty:
-            if isinstance(df_bist.columns, pd.MultiIndex): df_bist = df_bist.xs('Close', level=0, axis=1)
-            elif 'Close' in df_bist.columns: df_bist = df_bist['Close']
-            return df_bist.iloc[:, 0] if isinstance(df_bist, pd.DataFrame) else df_bist
-        return pd.Series()
-    except: return pd.Series()
 
 # --- MAPPING & FİYAT ---
 def create_asset_mapping(watchlist):
@@ -208,14 +187,11 @@ def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
     if df_prices.empty or df_trans.empty: return pd.DataFrame()
     trend_data, running_port, trans_idx = [], {}, 0
     df_prices, df_trans = df_prices.sort_values("Tarih"), df_trans.sort_values("Tarih")
-    
     first_trans_date = df_trans['Tarih'].min()
     current_assets, _, _ = calculate_portfolio(df_trans, df_prices)
-    
     for _, pr in df_prices.iterrows():
         cd = pr['Tarih']
         if cd < first_trans_date: continue
-        
         while trans_idx < len(df_trans):
             td = df_trans.iloc[trans_idx]['Tarih']
             if td <= cd:
@@ -224,13 +200,11 @@ def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
                 running_port[v] = running_port.get(v, 0.0) + (ad if isl == "ALIS" else -ad)
                 trans_idx += 1
             else: break
-            
         tot = 0
         for _, asset in current_assets.iterrows():
             v = asset['Varlık']
             # NAKİT VE ADET KORUYUCU (1.8M FIX)
-            qty = running_port.get(v, asset['Adet']) 
-            if qty <= 0.001: continue
+            qty = running_port.get(v, asset['Adet'])
             tot += (qty * find_smart_price(pr, v))
         if tot > 0: trend_data.append({"Tarih": cd, "Toplam Servet": tot/rate})
     return pd.DataFrame(trend_data)
@@ -254,7 +228,7 @@ def render_rebalance_assistant(df_view):
     def style_aksiyon(val): return f"color: {'#00FF00' if 'AL' in val else '#FF4B4B' if 'SAT' in val else 'white'}; font-weight: bold"
     st.dataframe(df_ana.style.applymap(style_aksiyon, subset=['Aksiyon']).format({"Mevcut Değer": "{:,.2f} TL"}), use_container_width=True, hide_index=True)
 
-# --- ANA PROGRAM ---
+# --- UYGULAMA ---
 def main():
     df_prices, df_trans, watchlist = load_data()
     ASSET_MAPPING = create_asset_mapping(watchlist)
@@ -264,6 +238,7 @@ def main():
             last = df_prices.iloc[-1]
             st.markdown(f'<div style="display: flex; gap: 10px; margin-bottom: 20px;"><div class="currency-card" style="flex: 1;"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{last["DOLAR KURU"]:.2f} ₺</div></div><div class="currency-card" style="flex: 1;"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{last["EURO KURU"]:.2f} ₺</div></div></div>', unsafe_allow_html=True)
         page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
+        st.divider()
         if st.button("🔄 Verileri Yenile", use_container_width=True): st.cache_data.clear(); st.rerun()
         with st.expander("➕ İşlem Ekle"):
             with st.form("add"):
@@ -276,8 +251,8 @@ def main():
                         sheet = client.open(SHEET_NAME); ws = sheet.worksheet("Islemler")
                         row = [f_date.strftime("%d.%m.%Y"), f_tur, f_varlik, f_islem, str(f_adet).replace(".", ","), str(f_fiyat).replace(".", ",")]
                         ws.append_row(row, value_input_option='USER_ENTERED')
-                        st.success(f"✅ Eklendi: {f_varlik}"); time.sleep(1); st.cache_data.clear(); st.rerun()
-                    except Exception as e: st.error(f"Hata: {e}")
+                        st.success(f"✅ Eklendi"); time.sleep(1); st.cache_data.clear(); st.rerun()
+                    except: st.error("İşlem kaydedilemedi.")
         with st.expander("🛠️ Takip Listesi"):
             ns = st.text_input("Sembol (Örn: SASA.IS)")
             if st.button("Ekle", use_container_width=True): 
@@ -352,7 +327,7 @@ def main():
                 clean_name, series = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", ""), df_prices[col].replace(0, np.nan).ffill()
                 if series.empty: continue
                 row = {"Varlık": clean_name, "Fiyat": series.iloc[-1], "RSI": calculate_rsi(series).iloc[-1], "Trend": series.tail(30).tolist()}
-                for k, v in ivs.items(): row[f"{k} Değişim"] = get_pct_change(df_prices, col, v)
+                for label, mins in ivs.items(): row[f"{label} Değişim"] = get_pct_change(df_prices, col, mins)
                 market_data.append(row)
         df_m = pd.DataFrame(market_data)
         
