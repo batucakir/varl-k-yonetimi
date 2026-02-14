@@ -12,38 +12,7 @@ import yfinance as yf
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
-
-# 1. FONLAR
-MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
-
-# 2. HİSSELER (BIST 30 + SENİN LİSTEN)
-BIST_30 = [
-    "AKBNK.IS", "ALARK.IS", "ARCLK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", "BRSAN.IS", 
-    "DOAS.IS", "EKGYO.IS", "ENKAI.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "GUBRF.IS", 
-    "HEKTS.IS", "ISCTR.IS", "KCHOL.IS", "KONTR.IS", "KOZAL.IS", "KRDMD.IS", "OYAKC.IS", 
-    "PETKM.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", 
-    "TOASO.IS", "TUPRS.IS", "YKBNK.IS"
-]
-
-MY_EXTRAS = [
-    "TERA.IS", "TRHOL.IS", "TEHOL.IS", "IEYHO.IS", "ODINE.IS", "MIATK.IS", "HEDEF.IS"
-]
-
-ALL_STOCKS = sorted(list(set(BIST_30 + MY_EXTRAS)))
-
-# --- SÜTUN YAPISI ---
-BASE_COLUMNS = [
-    "Tarih", "DOLAR KURU",
-    "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ",
-    "22 AYAR ALTIN ALIŞ", "22 AYAR ALTIN SATIŞ",
-    "ATA ALTIN ALIŞ", "ATA ALTIN SATIŞ",
-    "ÇEYREK ALTIN ALIŞ", "ÇEYREK ALTIN SATIŞ",
-    "ALTIN ONS ALIŞ", "ALTIN ONS SATIŞ"
-]
-
-FUND_COLUMNS = [f"{code} FİYAT" for code in MY_FUNDS]
-STOCK_COLUMNS = [f"{ticker} FİYAT" for ticker in ALL_STOCKS]
-SUTUN_SIRASI = BASE_COLUMNS + FUND_COLUMNS + STOCK_COLUMNS
+CONFIG_SHEET_NAME = "Ayarlar"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -58,7 +27,7 @@ def connect_to_sheet():
             if os.path.exists('credentials.json'):
                 creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
                 client = gspread.authorize(creds)
-                sheet = client.open(SHEET_NAME).sheet1
+                sheet = client.open(SHEET_NAME)
                 return sheet
             else:
                 print("🔥 HATA: credentials.json bulunamadı!")
@@ -67,6 +36,27 @@ def connect_to_sheet():
             print(f"⚠️ Bağlantı denemesi {i+1} başarısız: {e}")
             time.sleep(5)
     return None
+
+def get_watchlist(client):
+    """Ayarlar sayfasından takip listesini okur"""
+    try:
+        sheet = client.open(SHEET_NAME)
+        try:
+            ws = sheet.worksheet(CONFIG_SHEET_NAME)
+        except:
+            # Sayfa yoksa oluştur ve varsayılanları ekle
+            ws = sheet.add_worksheet(title=CONFIG_SHEET_NAME, rows=100, cols=5)
+            default_assets = ["TLY", "DFI", "THYAO.IS", "ASELS.IS"]
+            ws.append_row(["Sembol"])
+            for asset in default_assets: ws.append_row([asset])
+            return default_assets
+
+        col_values = ws.col_values(1) # A sütununu oku
+        if len(col_values) > 1:
+            return [x.strip() for x in col_values[1:] if x.strip() != ""]
+        return []
+    except:
+        return []
 
 def clean_currency(value_str):
     if not value_str: return 0.0
@@ -80,10 +70,10 @@ def clean_currency(value_str):
         else: return float(clean_str.replace(',', ''))
     return float(clean_str)
 
-def get_last_known_from_sheet(sheet):
+def get_last_known_from_sheet(ws_data):
     memory = {}
     try:
-        all_values = sheet.get_all_values()
+        all_values = ws_data.get_all_values()
         if len(all_values) < 2: return {} 
         last_row = all_values[-1]
         headers = all_values[0]
@@ -128,7 +118,7 @@ def fetch_fund_single(code):
     url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
     headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
     try:
-        time.sleep(0.2) 
+        time.sleep(0.1) 
         resp = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
         top_list = soup.find("ul", class_="top-list")
@@ -144,60 +134,73 @@ def fetch_fund_single(code):
 def fetch_stock_price(ticker):
     try:
         stock = yf.Ticker(ticker)
-        # Hafta sonu olduğu için son kapanış fiyatını (history) alacağız
         hist = stock.history(period="1d")
         if not hist.empty:
             return float(hist['Close'].iloc[-1])
-        return 0.0
+        price = stock.fast_info['last_price']
+        return float(price) if price else 0.0
     except: return 0.0
 
-def update_all_assets(current_cache):
-    print("\n🌍 VARLIK GÜNCELLEMESİ BAŞLADI (Development Mode)...")
+def update_assets(watchlist, current_cache):
+    print(f"\n🌍 {len(watchlist)} Varlık Güncelleniyor...")
     new_cache = current_cache.copy()
     
-    # 1. Fonlar
-    for code in MY_FUNDS:
-        key = f"{code} FİYAT"
-        price = fetch_fund_single(code)
-        if price > 0: new_cache[key] = price
-        else: new_cache[key] = new_cache.get(key, 0)
-
-    # 2. Hisseler
-    print(f"   📈 {len(ALL_STOCKS)} Hisse taranıyor...")
-    for ticker in ALL_STOCKS:
-        key = f"{ticker} FİYAT"
-        price = fetch_stock_price(ticker)
-        if price > 0:
-            new_cache[key] = price
-            # print(f"✅ {ticker}: {price}") # Log kirliliği olmasın diye kapattım
+    for item in watchlist:
+        key = f"{item} FİYAT"
+        price = 0.0
+        
+        # Fon mu Hisse mi? (3-4 harfliyse ve . yoksa Fondur)
+        if len(item) <= 4 and "." not in item:
+            price = fetch_fund_single(item)
         else:
+            price = fetch_stock_price(item)
+            
+        if price > 0: 
+            new_cache[key] = price
+        else: 
             new_cache[key] = new_cache.get(key, 0)
     
     print("🌍 Tamamlandı.\n")
     return new_cache
 
 def main():
-    # --- UYKU MODU İPTAL EDİLDİ ---
-    # Geliştirme aşamasında her tetiklendiğinde çalışsın.
     tr_now = datetime.utcnow() + timedelta(hours=3)
     print(f"🤖 BOT ÇALIŞIYOR... (Saat: {tr_now.strftime('%H:%M')})")
     
-    sheet = connect_to_sheet()
-    if not sheet: return
+    sheet_client = connect_to_sheet()
+    if not sheet_client: return
+    
+    # 1. Takip Listesini Oku
+    watchlist = get_watchlist(sheet_client)
+    print(f"📋 Takip Listesi: {watchlist}")
 
-    # --- SÜTUN KONTROLÜ (KRİTİK) ---
-    # Eğer Excel'deki başlıklar eksikse, başlıkları yenile.
+    # 2. Sütunları Hazırla
+    base_cols = ["Tarih", "DOLAR KURU", "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ", 
+                 "22 AYAR ALTIN ALIŞ", "22 AYAR ALTIN SATIŞ", "ATA ALTIN ALIŞ", 
+                 "ATA ALTIN SATIŞ", "ÇEYREK ALTIN ALIŞ", "ÇEYREK ALTIN SATIŞ", 
+                 "ALTIN ONS ALIŞ", "ALTIN ONS SATIŞ"]
+    
+    dynamic_cols = [f"{item} FİYAT" for item in watchlist]
+    full_columns = base_cols + dynamic_cols
+    
+    ws_data = sheet_client.sheet1
+    
+    # Başlık Kontrolü
     try:
-        current_headers = sheet.row_values(1)
-        if len(current_headers) < len(SUTUN_SIRASI):
-            print("📝 YENİ HİSSELER TESPİT EDİLDİ! Tablo başlıkları güncelleniyor...")
-            sheet.delete_row(1)
-            sheet.insert_row(SUTUN_SIRASI, 1)
-            print("✅ Başlıklar güncellendi.")
+        current_headers = ws_data.row_values(1)
+        # Sadece eksik varsa ekle (Basit kontrol)
+        if len(current_headers) < len(full_columns) or current_headers[0] != "Tarih":
+             # Daha güvenli bir yöntem: 1. satırı tamamen güncelle
+             # Ancak sürekli sil-yaz yapmamak için sadece değişiklik varsa yapalım
+             if current_headers != full_columns:
+                 print("📝 Başlıklar güncelleniyor...")
+                 ws_data.clear() # Temiz sayfa daha güvenli başlık çakışması için
+                 ws_data.append_row(full_columns)
     except: pass
 
-    cached_data = get_last_known_from_sheet(sheet)
-    cached_data = update_all_assets(cached_data) 
+    # 3. Verileri Çek
+    cached_data = get_last_known_from_sheet(ws_data)
+    cached_data = update_assets(watchlist, cached_data)
     gold = fetch_gold()
     usd = fetch_usd()
     
@@ -208,10 +211,10 @@ def main():
     
     if gold:
         row_values = []
-        for col in SUTUN_SIRASI:
+        for col in full_columns:
             row_values.append(row_dict.get(col, 0.0))
         try:
-            sheet.append_row(row_values, value_input_option='USER_ENTERED')
+            ws_data.append_row(row_values, value_input_option='USER_ENTERED')
             print(f"✅ KAYIT BAŞARILI.")
         except Exception as e:
             print(f"🔥 Yazma Hatası: {e}")
