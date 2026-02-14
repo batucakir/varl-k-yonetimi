@@ -120,23 +120,30 @@ def get_pct_change(df, col, minutes):
     if old_price == 0: return 0.0
     return (current_price - old_price) / old_price
 
-# --- BENCHMARK MOTORU ---
+# --- BENCHMARK MOTORU (YENİ) ---
 @st.cache_data(ttl=3600)
 def get_bist_data(start_date):
     try:
+        # BIST 100 verisini yfinance ile çek
         df_bist = yf.download("XU100.IS", start=start_date, progress=False)
         if not df_bist.empty:
+            # Multi-index sütun sorununu çözmek için (yfinance yeni versiyonları için)
             if isinstance(df_bist.columns, pd.MultiIndex):
                 df_bist = df_bist.xs('Close', level=0, axis=1)
             elif 'Close' in df_bist.columns:
                 df_bist = df_bist['Close']
+            else:
+                return pd.Series()
+            
+            # Eğer DataFrame dönerse Series'e çevir (Tek sütun)
             if isinstance(df_bist, pd.DataFrame):
                 return df_bist.iloc[:, 0]
             return df_bist
         return pd.Series()
-    except: return pd.Series()
+    except Exception as e:
+        return pd.Series()
 
-# --- MAPPING & FİYAT ---
+# --- MAPPING ---
 def create_asset_mapping(watchlist):
     mapping = {
         "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
@@ -246,83 +253,62 @@ def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
         if tot > 0: trend_data.append({"Tarih": curr_date, "Toplam Servet": tot/rate})
     return pd.DataFrame(trend_data)
 
-# --- KIYASLAMA GRAFİĞİ ---
+# --- KIYASLAMA GRAFİĞİ (GÜNCELLENDİ) ---
 def render_benchmark_chart(df_trend, df_prices):
     if df_trend.empty or df_prices.empty: return
+    
+    # Verileri Günlük Baza İndirge
     df_port = df_trend.set_index("Tarih").resample("D").last().dropna()
     df_market = df_prices.set_index("Tarih").resample("D").last().dropna()
+    
     if df_port.empty: return
     start_date = df_port.index.min()
+    
+    # BIST 100 Çek
     bist_series = get_bist_data(start_date)
+    
+    # Birleştirme
     df_bench = pd.DataFrame(index=df_port.index)
     df_bench["Portföyüm"] = df_port["Toplam Servet"]
+    
+    # BIST Eşle
     if not bist_series.empty:
         try: bist_series.index = bist_series.index.tz_localize(None)
         except: pass
         df_bench["BIST 100"] = bist_series.reindex(df_bench.index, method='ffill')
+    
+    # Market Eşle
     df_bench["Dolar"] = df_market["DOLAR KURU"].reindex(df_bench.index, method='ffill')
     df_bench["Gram Altın"] = df_market["GRAM ALTIN SATIŞ"].reindex(df_bench.index, method='ffill')
     
+    # Normalizasyon (%)
     df_norm = df_bench.copy()
     for col in df_norm.columns:
         first_val = df_norm[col].iloc[0]
-        df_norm[col] = (df_norm[col] / first_val - 1) * 100 if first_val > 0 else 0
+        if pd.notna(first_val) and first_val > 0:
+            df_norm[col] = (df_norm[col] / first_val - 1) * 100
+        else:
+            df_norm[col] = 0
             
     fig = go.Figure()
+    # Portföy (Yeşil)
     fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["Portföyüm"], mode='lines', name='💎 Portföyüm', line=dict(color='#2E8B57', width=4)))
+    # BIST (Mavi)
     if "BIST 100" in df_norm.columns:
         fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["BIST 100"], mode='lines', name='BIST 100', line=dict(color='#1f77b4', width=2)))
+    # Dolar (Gri)
     fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["Dolar"], mode='lines', name='Dolar ($)', line=dict(color='#A9A9A9', width=2, dash='dot')))
+    # Altın (Sarı)
     fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["Gram Altın"], mode='lines', name='Gram Altın', line=dict(color='#FFD700', width=2)))
     
-    fig.update_layout(title="🏆 Performans Kıyaslama (Başlangıçtan İtibaren % Getiri)", yaxis_title="Getiri (%)", hovermode="x unified", height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- 2. MADDE EKLENDİ: KORELASYON MATRİSİ (YENİ) ---
-def render_correlation_heatmap(df_prices, df_view):
-    if df_prices.empty or df_view.empty: return
-    
-    # 1. Analiz edilecek varlıkların listesi (Sadece sendekiler)
-    my_assets = df_view['Varlık'].tolist()
-    asset_cols = []
-    
-    # Sütun eşleşmelerini bul
-    for asset in my_assets:
-        clean = asset.replace(" FONU", "").replace(" (Adet)", "").replace(" (Gr)", "").replace(" (Hisse)", "").strip()
-        for col in df_prices.columns:
-            if clean in col and ("FİYAT" in col or "ALIŞ" in col or "NAKİT" in col):
-                asset_cols.append(col)
-                break
-    
-    # Piyasayı da ekleyelim (Benchmark için)
-    asset_cols.extend(["DOLAR KURU", "GRAM ALTIN SATIŞ"])
-    asset_cols = list(set(asset_cols)) # Tekilleştir
-    
-    # 2. Günlük Yüzdesel Değişimleri Hesapla
-    df_corr_data = df_prices.set_index("Tarih")[asset_cols].resample("D").last().ffill().pct_change().dropna()
-    
-    if len(df_corr_data) < 2:
-        st.info("Korelasyon analizi için daha fazla veri toplanması gerekiyor.")
-        return
-
-    # Sütun isimlerini temizle (Tabloda güzel dursun)
-    df_corr_data.columns = [c.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "") for c in df_corr_data.columns]
-    
-    # 3. Matrisi Hesapla
-    corr_matrix = df_corr_data.corr()
-    
-    # 4. Çizim
-    fig = px.imshow(
-        corr_matrix,
-        text_auto=".2f",
-        aspect="auto",
-        color_continuous_scale='RdBu_r', # Kırmızıdan Maviye (Negatiften Pozitife)
-        zmin=-1, zmax=1,
-        title="🔥 Varlık Korelasyon Isı Haritası (Risk Dağılımı)"
+    fig.update_layout(
+        title="🏆 Performans Kıyaslama (Başlangıçtan İtibaren % Getiri)",
+        yaxis_title="Getiri (%)",
+        hovermode="x unified",
+        height=450,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    fig.update_layout(height=500)
     st.plotly_chart(fig, use_container_width=True)
-
 
 def save_transaction(date_obj, tur, varlik, islem, adet, fiyat):
     try:
@@ -447,6 +433,7 @@ def main():
                             fig.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                             st.plotly_chart(fig, use_container_width=True, key=f"trend_{curr}")
                             
+                            # --- BENCHMARK GRAFİĞİ (SADECE TL İÇİN) ---
                             if curr == "TL":
                                 st.divider()
                                 render_benchmark_chart(df_trend, df_prices)
@@ -457,11 +444,13 @@ def main():
                             grp_mode = st.radio("Görünüm", ["Ana Gruplar", "Detaylı"], horizontal=True, key=f"rad_{curr}")
                             grp_col = "Grup" if grp_mode == "Ana Gruplar" else "Varlık"
                             df_pie = df_view.groupby(grp_col)["Net Değer"].sum().reset_index()
+                            
                             if grp_mode == "Ana Gruplar":
                                 custom_colors = {"ALTIN": "#FFD700", "NAKİT": "#1f77b4", "FON": "#2ca02c", "HİSSE": "#d62728", "DÖVİZ": "#17becf"}
                                 fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color=grp_col, color_discrete_map=custom_colors)
                             else:
                                 fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism)
+                                
                             fig_p.update_traces(textinfo="percent+label", textfont_size=18)
                             st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{curr}")
                         with c2:
@@ -481,18 +470,18 @@ def main():
                             makas = satis - alis
                             pct_m = makas/satis*100 if satis>0 else 0
                             gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{pct_m:.2f})", delta_color="inverse")
-                        
-                        # --- EN ALTA KORELASYON EKLE (SADECE TL SEKMESİNDE) ---
-                        if curr == "TL":
-                            st.divider()
-                            render_correlation_heatmap(df_prices, df_view)
 
     # --- SAYFA 2: PİYASA TAKİP ---
     elif page == "Piyasa Takip":
         st.markdown("## 🌍 Detaylı Piyasa Analizi")
         if not df_prices.empty:
+            
             market_data = []
-            intervals = {"10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360, "1 Gün": 1440, "3 Gün": 4320, "1 Hafta": 10080, "2 Hafta": 20160, "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600}
+            intervals = {
+                "10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360,
+                "1 Gün": 1440, "3 Gün": 4320, "1 Hafta": 10080, "2 Hafta": 20160,
+                "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600
+            }
             cols = list(df_prices.columns)
             for col in cols:
                 if col == "Tarih": continue
@@ -503,24 +492,39 @@ def main():
                     rsi = 50.0
                     try: rsi = calculate_rsi(series).iloc[-1]
                     except: pass
-                    row_data = {"Enstrüman": clean_name, "Fiyat": current_price, "RSI": rsi, "Trend": series.tail(30).tolist()}
-                    for label, mins in intervals.items(): row_data[label] = get_pct_change(df_prices, col, mins)
+                    row_data = {
+                        "Enstrüman": clean_name, "Fiyat": current_price, "RSI": rsi,
+                        "Trend": series.tail(30).tolist()
+                    }
+                    for label, mins in intervals.items():
+                        row_data[label] = get_pct_change(df_prices, col, mins)
                     market_data.append(row_data)
             
             df_m = pd.DataFrame(market_data)
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
-            col_config = {"Enstrüman": st.column_config.TextColumn("Varlık", width="small"), "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.6f TL"), "RSI": st.column_config.NumberColumn("RSI", format="%.0f"), "Trend": st.column_config.LineChartColumn("Trend (30 Veri)", y_min=0, width="small")}
-            for label in intervals.keys(): col_config[label] = st.column_config.NumberColumn(label, format="%.2f %%")
+            
+            col_config = {
+                "Enstrüman": st.column_config.TextColumn("Varlık", width="small"),
+                "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.6f TL"),
+                "RSI": st.column_config.NumberColumn("RSI", format="%.0f"),
+                "Trend": st.column_config.LineChartColumn("Trend (30 Veri)", y_min=0, width="small"),
+            }
+            for label in intervals.keys():
+                col_config[label] = st.column_config.NumberColumn(label, format="%.2f %%")
 
             def show_detailed_table(keyword):
-                if keyword == "Hisse": df_show = df_m[df_m["Enstrüman"].str.contains(".IS", na=False)]
+                if keyword == "Hisse": 
+                    df_show = df_m[df_m["Enstrüman"].str.contains(".IS", na=False)]
                 elif keyword == "Fon": 
                     df_show = df_m[df_m["Enstrüman"].apply(lambda x: len(str(x))<=4 and "." not in str(x))]
                     display_cols = ["Enstrüman", "Fiyat", "RSI", "Trend"] + [k for k in intervals.keys() if "Dk" not in k and "Saat" not in k]
                     df_show = df_show[display_cols]
-                else: df_show = df_m[df_m["Enstrüman"].str.contains("ALTIN|DOLAR", na=False)]
+                else: 
+                    df_show = df_m[df_m["Enstrüman"].str.contains("ALTIN|DOLAR", na=False)]
+
                 if df_show.empty: st.info("Veri yok."); return
                 st.dataframe(df_show, column_config=col_config, use_container_width=True, hide_index=True)
+
             with t1: show_detailed_table("Hisse")
             with t2: show_detailed_table("Fon")
             with t3: show_detailed_table("Emtia")
