@@ -73,12 +73,12 @@ def load_data():
             df_prices.columns = df_prices.columns.str.strip()
             for col in df_prices.columns:
                 if col != "Tarih":
-                    # V64: Sayı formatlarını onar (Excel'den gelen noktaları temizle)
+                    # Sayı onarıcı: 7.408,21 -> 7408.21
                     df_prices[col] = df_prices[col].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
                     df_prices[col] = pd.to_numeric(df_prices[col], errors='coerce')
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             df_prices = df_prices.dropna(subset=['Tarih']).sort_values("Tarih")
-            df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
+            df_prices = df_prices.ffill().fillna(0)
             if not df_prices.empty and df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                 df_prices = df_prices.iloc[:-1]
         else: df_prices = pd.DataFrame()
@@ -88,9 +88,12 @@ def load_data():
             if len(data_trans) > 1:
                 df_trans = pd.DataFrame(data_trans[1:], columns=data_trans[0])
                 df_trans.columns = df_trans.columns.str.strip()
-                df_trans['Adet'] = pd.to_numeric(df_trans['Adet'].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
-                df_trans['Fiyat'] = pd.to_numeric(df_trans['Fiyat'].astype(str).str.replace(",", "."), errors='coerce').fillna(0)
+                df_trans['Adet'] = df_trans['Adet'].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+                df_trans['Adet'] = pd.to_numeric(df_trans['Adet'], errors='coerce').fillna(0)
+                df_trans['Fiyat'] = df_trans['Fiyat'].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+                df_trans['Fiyat'] = pd.to_numeric(df_trans['Fiyat'], errors='coerce').fillna(0)
                 df_trans['Tarih'] = pd.to_datetime(df_trans['Tarih'], dayfirst=True, errors='coerce')
+                df_trans = df_trans.dropna(subset=['Tarih'])
             else: df_trans = pd.DataFrame()
         except: df_trans = pd.DataFrame()
         try:
@@ -110,13 +113,17 @@ def calculate_rsi(series, period=14):
     rs = gain / (loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
-def get_pct_change(df, col, days):
-    if df.empty or len(df) < 5: return 0.0
+def get_pct_change(df, col, mins):
+    if df.empty or len(df) < 2: return 0.0
     current_price = df.iloc[-1][col]
-    # Gün bazlı arama (V64 İyileştirmesi)
-    target_date = df.iloc[-1]['Tarih'] - timedelta(days=days)
-    old_df = df[df['Tarih'] <= target_date]
-    old_price = old_df.iloc[-1][col] if not old_df.empty else df.iloc[0][col]
+    target_time = df.iloc[-1]['Tarih'] - timedelta(minutes=mins)
+    # Gelişmiş Tarih Arama: Belirtilen süreden önceki en yakın kaydı bulur
+    past_df = df[df['Tarih'] <= target_time]
+    if past_df.empty: 
+        old_price = df.iloc[0][col]
+    else:
+        old_price = past_df.iloc[-1][col]
+        
     if old_price == 0: return 0.0
     return (current_price - old_price) / old_price
 
@@ -174,42 +181,46 @@ def calculate_portfolio(df_trans, df_prices):
         gd = d["adet"] * cp
         vergi = (gd - d["maliyet"]) * FON_VERGI_ORANI if "FON" in str(d["tur"]).upper() and gd > d["maliyet"] else 0
         nd = gd - vergi
+        kar = nd - d["maliyet"]
         table_rows.append({"Grup": d["tur"], "Varlık": v, "Adet": d["adet"], "Fiyat": cp, "Maliyet": d["maliyet"], "Net Değer": nd, "Net Kâr": nd - d["maliyet"], "Vergi": vergi})
         tot_w += nd
         tot_t += vergi
     return pd.DataFrame(table_rows), tot_w, tot_t
 
 def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
-    if df_prices.empty: return pd.DataFrame()
+    if df_prices.empty or df_trans.empty: return pd.DataFrame()
+    trend_data, running_port, trans_idx = [], {}, 0
+    df_prices = df_prices.sort_values("Tarih")
+    df_trans = df_trans.sort_values("Tarih")
     
-    # Bugün sahip olduğumuz varlık adetlerini alıyoruz (Geçmişte serveti doğru göstermek için)
-    current_port, _, _ = calculate_portfolio(df_trans, df_prices)
+    first_trans_date = df_trans['Tarih'].min() # ALIM SATIM NE ZAMNSA O ZAMANDAN BAŞLAT
     
-    # Günlük bazda temiz veriye indirgeme
-    df_prices['D'] = df_prices['Tarih'].dt.date
-    daily_prices = df_prices.groupby('D').last().reset_index()
-    daily_prices['Tarih'] = pd.to_datetime(daily_prices['D'])
-    
-    trend_data = []
-    for _, pr in daily_prices.iterrows():
-        day_total = 0
-        for _, asset in current_port.iterrows():
-            v = asset['Varlık']
-            qty = asset['Adet']
-            p = 0
-            if v == "TL Bakiye": p = 1.0
-            else:
-                pk = asset_map.get(v)
-                if pk:
-                    for col in pr.index:
-                        if pk in col: p = pr[col]; break
-                else: # Fallback search
-                    sv = v.replace(" FONU", "").replace(" (Gr)", "").replace(" (Adet)", "").replace(" (Hisse)", "").strip()
-                    for col in pr.index:
-                        if sv in col: p = pr[col]; break
-            day_total += (qty * p)
+    for _, pr in df_prices.iterrows():
+        cd = pr['Tarih']
+        if cd < first_trans_date: continue # İlk işlemden öncesini grafiğe ekleme
         
-        if day_total > 0: trend_data.append({"Tarih": pr['Tarih'], "Toplam Servet": day_total/rate})
+        while trans_idx < len(df_trans):
+            td = df_trans.iloc[trans_idx]['Tarih']
+            if td <= cd:
+                tr = df_trans.iloc[trans_idx]
+                v, isl, ad = str(tr['Varlık']).strip(), str(tr['İşlem']).upper().strip(), float(tr['Adet'])
+                cq = running_port.get(v, 0.0)
+                running_port[v] = cq + ad if isl == "ALIS" else cq - ad
+                trans_idx += 1
+            else: break
+        
+        tot = 0
+        for v, qty in running_port.items():
+            if qty <= 0.001: continue
+            pk, p = asset_map.get(v), 0
+            if pk == "NAKİT": p = 1.0
+            elif pk:
+                for col in pr.index:
+                    if pk in col: p = pr[col]; break
+            else: p = find_smart_price(pr, v)
+            tot += (qty * p)
+        
+        if tot > 0: trend_data.append({"Tarih": cd, "Toplam Servet": tot/rate})
     return pd.DataFrame(trend_data)
 
 # --- KIYASLAMA GRAFİĞİ ---
@@ -235,10 +246,10 @@ def render_benchmark_chart(df_trend, df_prices):
     if "BIST 100" in df_n.columns: fig.add_trace(go.Scatter(x=df_n.index, y=df_n["BIST 100"], name='BIST 100', line=dict(color='#1f77b4', width=2)))
     fig.add_trace(go.Scatter(x=df_n.index, y=df_n["Dolar"], name='Dolar ($)', line=dict(color='#A9A9A9', width=2, dash='dot')))
     fig.add_trace(go.Scatter(x=df_n.index, y=df_n["Gram Altın"], name='Gram Altın', line=dict(color='#FFD700', width=2)))
-    fig.update_layout(title="🏆 Performans Kıyaslama (1 Yıllık % Getiri)", yaxis_title="Getiri (%)", hovermode="x unified", height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_layout(title="🏆 Performans Kıyaslama (İşlem Başlangıcından İtibaren % Getiri)", yaxis_title="Getiri (%)", hovermode="x unified", height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 3. MADDE: REBALANS ASİSTANI (YENİ) ---
+# --- REBALANS ASİSTANI ---
 def render_rebalance_assistant(df_view):
     if df_view.empty: return
     st.subheader("⚖️ Portföy Rebalans (Dengeleme) Asistanı")
@@ -250,8 +261,6 @@ def render_rebalance_assistant(df_view):
     for i, row in df_grp.iterrows():
         grp_name = row["Grup"]
         target_ratios[grp_name] = cols[i].number_input(f"Hedef % ({grp_name})", min_value=0, max_value=100, value=int(100/len(df_grp)))
-    if sum(target_ratios.values()) != 100:
-        st.warning(f"⚠️ Hedef oranlar toplamı şu an %{sum(target_ratios.values())}. Lütfen %100 yapın.")
     analysis = []
     for i, row in df_grp.iterrows():
         grp = row["Grup"]
@@ -261,28 +270,6 @@ def render_rebalance_assistant(df_view):
     df_ana = pd.DataFrame(analysis)
     def style_aksiyon(val): return f"color: {'#00FF00' if 'AL' in val else '#FF4B4B' if 'SAT' in val else 'white'}; font-weight: bold"
     st.dataframe(df_ana.style.applymap(style_aksiyon, subset=['Aksiyon']).format({"Mevcut Değer": "{:,.2f} TL"}), use_container_width=True, hide_index=True)
-
-# --- İŞLEMLER ---
-def save_transaction(date_obj, tur, varlik, islem, adet, fiyat):
-    try:
-        client = get_client()
-        sheet = client.open(SHEET_NAME)
-        ws = sheet.worksheet("Islemler")
-        date_str = date_obj.strftime("%d.%m.%Y")
-        row = [date_str, tur, varlik, islem, str(adet).replace(".", ","), str(fiyat).replace(".", ",")]
-        ws.append_row(row, value_input_option='USER_ENTERED')
-        st.success(f"✅ Eklendi: {varlik}"); time.sleep(1); st.cache_data.clear(); st.rerun()
-    except Exception as e: st.error(f"Hata: {e}")
-
-def add_to_watchlist_sheet(symbol):
-    try:
-        client = get_client()
-        sheet = client.open(SHEET_NAME)
-        try: ws = sheet.worksheet(CONFIG_SHEET_NAME)
-        except: ws = sheet.add_worksheet(CONFIG_SHEET_NAME, 100, 5); ws.append_row(["Sembol"])
-        if symbol not in ws.col_values(1): ws.append_row([symbol]); return True
-        return False
-    except: return False
 
 # --- UYGULAMA ---
 def main():
@@ -296,19 +283,7 @@ def main():
             st.markdown(f'<div style="display: flex; gap: 10px; margin-bottom: 20px;"><div class="currency-card" style="flex: 1;"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div><div class="currency-card" style="flex: 1;"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div></div>', unsafe_allow_html=True)
         else: usd, eur = 1.0, 1.0
         page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
-        st.divider()
         if st.button("🔄 Verileri Yenile", use_container_width=True): st.cache_data.clear(); st.rerun()
-        with st.expander("➕ İşlem Ekle"):
-            with st.form("add"):
-                f_date, f_tur = st.date_input("Tarih", datetime.now()), st.selectbox("Tür", ["ALTIN", "FON", "HİSSE", "NAKİT", "DÖVİZ"])
-                default_assets = ["TLY FONU", "DFI FONU", "TP2 FONU", "TL Bakiye", "22 AYAR BİLEZİK (Gr)", "ATA ALTIN (Adet)"]
-                f_varlik = st.selectbox("Varlık", default_assets + [x + " (Hisse)" for x in watchlist if ".IS" in x])
-                f_islem, f_adet, f_fiyat = st.selectbox("İşlem", ["ALIS", "SATIS"]), st.number_input("Adet", min_value=0.0, step=0.01), st.number_input("Fiyat", min_value=0.0, step=0.01)
-                if st.form_submit_button("Kaydet", use_container_width=True): save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
-        with st.expander("🛠️ Takip Listesi"):
-            ns = st.text_input("Sembol (Örn: SASA.IS)")
-            if st.button("Ekle", use_container_width=True): 
-                if add_to_watchlist_sheet(ns): st.success("Eklendi")
 
     if page == "Portföyüm":
         if not df_trans.empty and not df_prices.empty:
@@ -317,12 +292,12 @@ def main():
             for t, curr, rate in [(tab1, "TL", 1.0), (tab2, "$", usd), (tab3, "€", eur)]:
                 with t:
                     if not df_view.empty:
-                        net_p, cost = df_view["Net Kâr"].sum(), df_view["Maliyet"].sum()
                         df_trend = prepare_historical_trend(df_prices, df_trans, ASSET_MAPPING, rate)
+                        net_p = df_view["Net Kâr"].sum()
                         c1, c2, c3 = st.columns(3)
                         c1.metric("Toplam Varlık", f"{format_tr_money(tot_wealth/rate)} {curr}", f"Vergi: -{format_tr_money(tot_tax/rate)} {curr}", delta_color="inverse")
                         c2.metric("Net Kâr", f"{format_tr_money(net_p/rate)} {curr}")
-                        c3.metric("Kâr Oranı", f"%{format_tr_money(net_p/cost*100 if cost>0 else 0)}")
+                        c3.metric("Kâr Oranı", f"%{format_tr_money(net_p/df_view['Maliyet'].sum()*100 if df_view['Maliyet'].sum()>0 else 0)}")
                         st.divider()
                         if curr == "TL":
                             st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
@@ -331,10 +306,10 @@ def main():
                             h1.caption(f"🏁 Kalan: **{format_tr_money(HEDEF_SERVET_TL - tot_wealth)} TL**")
                             h2.caption(f"⏳ Bitiş: **{HEDEF_TARIH.strftime('%d.%m.%Y')}** ({(HEDEF_TARIH - datetime.now()).days} Gün)")
                             st.divider()
-                        st.subheader("📈 Servet Değişimi (1 Yıllık)")
+                        st.subheader("📈 Servet Değişimi")
                         if not df_trend.empty:
                             fig = px.area(df_trend, x="Tarih", y="Toplam Servet")
-                            fig.update_layout(yaxis_range=[df_trend["Toplam Servet"].min()*0.95, df_trend["Toplam Servet"].max()*1.05], height=400, hovermode="x unified")
+                            fig.update_layout(yaxis_range=[df_trend["Toplam Servet"].min()*0.98, df_trend["Toplam Servet"].max()*1.02], height=400, hovermode="x unified")
                             fig.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                             st.plotly_chart(fig, use_container_width=True, key=f"trend_{curr}")
                             if curr == "TL": st.divider(); render_benchmark_chart(df_trend, df_prices)
@@ -346,35 +321,28 @@ def main():
                             fig_p = px.pie(df_pie, values="Net Değer", names=df_pie.columns[0], hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism)
                             fig_p.update_traces(textinfo="percent+label", textfont_size=18); st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{curr}")
                         with c2:
-                            st.subheader("Kâr/Zarar Durumu")
+                            st.subheader("Kâr/Zarar")
                             fig_b = go.Figure([go.Bar(name='Maliyet', x=df_view['Varlık'], y=df_view['Maliyet']/rate, marker_color='lightgrey'), go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer']/rate, marker_color='forestgreen')])
                             fig_b.update_layout(xaxis_tickangle=0); st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{curr}")
                         if curr == "TL": st.divider(); render_rebalance_assistant(df_view)
-                        st.subheader("🥇 Altın Makas")
-                        last_p = df_prices.iloc[-1]
-                        gold_cols = st.columns(4)
-                        for i, (name, key) in enumerate([("Gram", "GRAM ALTIN"), ("Ata", "ATA ALTIN"), ("22 Ayar", "22 AYAR ALTIN"), ("Çeyrek", "ÇEYREK ALTIN")]):
-                            satis, alis = last_p.get(f"{key} SATIŞ", 0) / rate, last_p.get(f"{key} ALIŞ", 0) / rate
-                            makas = satis - alis
-                            gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{makas/satis*100 if satis>0 else 0:.2f})", delta_color="inverse")
 
     elif page == "Piyasa Takip":
         st.markdown("## 🌍 Detaylı Piyasa Analizi")
         if not df_prices.empty:
             market_data = []
-            ivs = {"1 Gün": 1, "1 Hafta": 7, "1 Ay": 30, "6 Ay": 180, "1 Yıl": 365}
+            intervals = {"10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360, "1 Gün": 1440, "1 Hafta": 10080, "1 Ay": 43200, "1 Yıl": 525600}
             for col in df_prices.columns:
                 if col == "Tarih" or "D" == col: continue
                 if any(x in col for x in ["FİYAT", "ALTIN", "DOLAR", "KURU"]):
                     clean_name, series = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", ""), df_prices[col].replace(0, np.nan).ffill()
                     if series.empty: continue
                     row = {"Varlık": clean_name, "Fiyat": series.iloc[-1], "RSI": calculate_rsi(series).iloc[-1], "Trend": series.tail(30).tolist()}
-                    for k, v in ivs.items(): row[k] = get_pct_change(df_prices, col, v)
+                    for label, mins in intervals.items(): row[label] = get_pct_change(df_prices, col, mins)
                     market_data.append(row)
             df_m = pd.DataFrame(market_data)
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
-            col_config = {"Varlık": st.column_config.TextColumn("Varlık", width="small"), "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.4f TL"), "RSI": st.column_config.NumberColumn("RSI", format="%.0f"), "Trend": st.column_config.LineChartColumn("30 Kayıt", y_min=0, width="small")}
-            for k in ivs.keys(): col_config[k] = st.column_config.NumberColumn(k, format="%.2f %%")
+            col_config = {"Varlık": st.column_config.TextColumn("Varlık", width="small"), "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.4f TL"), "RSI": st.column_config.NumberColumn("RSI", format="%.0f"), "Trend": st.column_config.LineChartColumn("Trend", y_min=0, width="small")}
+            for k in intervals.keys(): col_config[k] = st.column_config.NumberColumn(k, format="%.2f %%")
             def show_table(keyword):
                 if keyword == "Hisse": df_s = df_m[df_m["Varlık"].str.contains(".IS", na=False)]
                 elif keyword == "Fon": df_s = df_m[df_m["Varlık"].apply(lambda x: len(str(x))<=4 and "." not in str(x))]
