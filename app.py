@@ -238,7 +238,6 @@ def main():
             st.cache_data.clear()
             st.rerun()
             
-        # İşlem Ekleme Sadece Portföyde (Opsiyonel, her yerde de olabilir)
         st.divider()
         with st.expander("➕ İşlem Ekle", expanded=False):
             with st.form("transaction_form"):
@@ -265,7 +264,6 @@ def main():
             tab_tl, tab_usd = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
             for tab, currency, rate in [(tab_tl, "TL", 1.0), (tab_usd, "$", usd)]:
                 with tab:
-                    # Tablo Hesaplamaları
                     rows = []
                     for varlik, stats in portfolio.items():
                         adet = stats["adet"]
@@ -287,7 +285,6 @@ def main():
                     df_view = pd.DataFrame(rows)
                     
                     if not df_view.empty:
-                        # KPI Kartları
                         tot_wealth = df_view["Net Servet"].sum()
                         tot_tax = df_view["Vergi"].sum()
                         tot_profit = df_view["Net Kâr"].sum()
@@ -305,7 +302,7 @@ def main():
                         c3.metric("📈 Genel Kâr Oranı", f"{format_tr_percent(profit_ratio)}")
                         st.divider()
 
-                        # Hedef Çubuğu (Sadece TL)
+                        # Hedef
                         if currency == "TL":
                             prog = min(tot_wealth / HEDEF_SERVET_TL, 1.0)
                             kalan = HEDEF_SERVET_TL - tot_wealth
@@ -318,7 +315,6 @@ def main():
                             h2.caption(f"⏳ Bitiş: **28 Şubat 2026** ({days} gün kaldı)")
                             st.divider()
 
-                        # Tablo
                         st.subheader("📋 Detaylı Varlık Tablosu")
                         df_view["Kâr Oranı (%)"] = df_view.apply(lambda x: (x["Net Kâr"]/x["Toplam Maliyet"]*100) if x["Toplam Maliyet"]>0 else 0, axis=1)
                         st.dataframe(df_view.style.format({
@@ -328,7 +324,6 @@ def main():
                         }), use_container_width=True, hide_index=True)
                         st.divider()
 
-                        # Grafikler
                         st.subheader(f"📈 Gerçek Tarihsel Servet Değişimi ({currency})")
                         df_trend = prepare_true_historical_trend(df_prices, df_trans, rate)
                         if not df_trend.empty:
@@ -340,7 +335,6 @@ def main():
                             st.plotly_chart(fig_t, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                         st.divider()
 
-                        # Pasta ve Bar Grafik
                         g1, g2 = st.columns(2)
                         with g1:
                             st.subheader("Varlık Dağılımı")
@@ -362,49 +356,97 @@ def main():
         else:
             st.info("☁️ Henüz bir işlem girmedin. Sol taraftan 'Yeni İşlem Ekle' diyerek başlayabilirsin.")
 
-    # --- SAYFA 2: PİYASA TAKİP (WATCHLIST) ---
+    # --- SAYFA 2: PİYASA TAKİP (GELİŞMİŞ TABLO) ---
     elif selected_page == "Piyasa Takip":
         st.markdown("<h1 style='text-align: center; color: #4169E1;'>🌍 Piyasa Takip Ekranı</h1>", unsafe_allow_html=True)
-        st.caption("Takip listendeki tüm varlıkların anlık durumudur. Portföyünde olup olmadığına bakılmaksızın gösterilir.")
+        st.caption("Takip listendeki varlıkların anlık durumu. Tablo başlıklarına tıklayarak sıralama yapabilirsin.")
         st.divider()
 
         if not df_prices.empty:
             last_row = df_prices.iloc[-1]
-            # Günlük değişimi hesaplamak için dünkü veriye ihtiyacımız var
-            if len(df_prices) > 1:
-                prev_row = df_prices.iloc[-2]
-            else:
-                prev_row = last_row # Veri yoksa değişim 0 olsun
+            prev_row = df_prices.iloc[-2] if len(df_prices) > 1 else last_row
+            
+            # Son 30 veriyi grafik (sparkline) için alalım
+            df_trend_subset = df_prices.tail(30)
 
-            # --- FONLAR ---
-            st.subheader("📊 Yatırım Fonları")
-            cols = st.columns(4) # 4'lü ızgara
-            for i, fund_code in enumerate(MY_FUNDS):
-                key = f"{fund_code} FİYAT"
-                price = last_row.get(key, 0)
-                old_price = prev_row.get(key, 0)
-                diff = (price - old_price) / old_price * 100 if old_price > 0 else 0
-                
-                with cols[i % 4]:
-                    st.metric(label=f"{fund_code}", value=f"{price:.4f}", delta=f"%{diff:.2f}")
-
-            st.divider()
-
-            # --- HİSSELER ---
-            st.subheader("📈 Takipteki Hisseler (BIST)")
-            cols_stock = st.columns(6) # Hisseler çok olduğu için 6'lı ızgara
-            for i, stock_code in enumerate(ALL_STOCK_CODES):
+            # 1. HİSSE SENETLERİ VERİSİNİ HAZIRLA
+            stock_data = []
+            for stock_code in ALL_STOCK_CODES:
                 key = f"{stock_code}.IS FİYAT"
                 price = last_row.get(key, 0)
                 old_price = prev_row.get(key, 0)
-                diff = (price - old_price) / old_price * 100 if old_price > 0 else 0
+                diff_pct = (price - old_price) / old_price if old_price > 0 else 0
                 
-                with cols_stock[i % 6]:
-                    st.metric(label=stock_code, value=f"{price:.2f}", delta=f"%{diff:.2f}")
+                # Trend grafiği için veriyi listeye çevir
+                trend_list = df_trend_subset[key].tolist() if key in df_trend_subset.columns else []
+
+                stock_data.append({
+                    "Sembol": stock_code,
+                    "Fiyat (TL)": price,
+                    "Günlük Değişim": diff_pct,
+                    "Trend (30 Gün)": trend_list
+                })
             
+            df_stocks = pd.DataFrame(stock_data)
+
+            # 2. FON VERİSİNİ HAZIRLA
+            fund_data = []
+            for fund_code in MY_FUNDS:
+                key = f"{fund_code} FİYAT"
+                price = last_row.get(key, 0)
+                old_price = prev_row.get(key, 0)
+                diff_pct = (price - old_price) / old_price if old_price > 0 else 0
+                trend_list = df_trend_subset[key].tolist() if key in df_trend_subset.columns else []
+
+                fund_data.append({
+                    "Fon Kodu": fund_code,
+                    "Fiyat (TL)": price,
+                    "Günlük Değişim": diff_pct,
+                    "Trend (30 Gün)": trend_list
+                })
+            
+            df_funds = pd.DataFrame(fund_data)
+
+            # --- TABLOLARI GÖSTER (ST.DATAFRAME ILE) ---
+            
+            st.subheader("📈 BIST Hisseleri")
+            st.dataframe(
+                df_stocks,
+                column_config={
+                    "Sembol": st.column_config.TextColumn("Hisse", width="medium"),
+                    "Fiyat (TL)": st.column_config.NumberColumn("Fiyat", format="%.2f TL"),
+                    "Günlük Değişim": st.column_config.NumberColumn(
+                        "Değişim %", 
+                        format="%.2f %%", 
+                        help="Bir önceki kayda göre değişim"
+                    ),
+                    "Trend (30 Gün)": st.column_config.LineChartColumn(
+                        "Trend", y_min=0, width="medium"
+                    )
+                },
+                use_container_width=True,
+                hide_index=True,
+                height=500 # Kaydırma çubuğu ile kompakt görünüm
+            )
+
             st.divider()
 
-            # --- ALTIN & DÖVİZ ---
+            st.subheader("📊 Yatırım Fonları")
+            st.dataframe(
+                df_funds,
+                column_config={
+                    "Fon Kodu": st.column_config.TextColumn("Fon", width="medium"),
+                    "Fiyat (TL)": st.column_config.NumberColumn("Fiyat", format="%.4f TL"),
+                    "Günlük Değişim": st.column_config.NumberColumn("Değişim %", format="%.2f %%"),
+                    "Trend (30 Gün)": st.column_config.LineChartColumn("Trend", y_min=0, width="medium")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+            
+            # --- ALTIN & DÖVİZ (KARTLAR KALABİLİR, SAYILARI AZ) ---
             st.subheader("🥇 Altın ve Döviz")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Dolar/TL", f"{usd:.2f}")
