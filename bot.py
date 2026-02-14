@@ -38,18 +38,20 @@ def connect_to_sheet():
     return None
 
 def get_watchlist(client):
+    """Ayarlar sayfasından takip listesini okur"""
     try:
         sheet = client.open(SHEET_NAME)
         try:
             ws = sheet.worksheet(CONFIG_SHEET_NAME)
         except:
+            # Sayfa yoksa oluştur ve varsayılanları ekle
             ws = sheet.add_worksheet(title=CONFIG_SHEET_NAME, rows=100, cols=5)
             default_assets = ["TLY", "DFI", "THYAO.IS", "ASELS.IS"]
             ws.append_row(["Sembol"])
             for asset in default_assets: ws.append_row([asset])
             return default_assets
 
-        col_values = ws.col_values(1)
+        col_values = ws.col_values(1) # A sütununu oku
         if len(col_values) > 1:
             return [x.strip() for x in col_values[1:] if x.strip() != ""]
         return []
@@ -85,24 +87,19 @@ def get_last_known_from_sheet(ws_data):
     except: pass
     return memory
 
-# --- DÖVİZ ÇEKME (USD + EUR) ---
-def fetch_currencies():
-    rates = {"USD": 0.0, "EUR": 0.0}
+def fetch_usd():
     try:
-        url_usd = "https://api.exchangerate-api.com/v4/latest/USD"
-        resp = requests.get(url_usd, timeout=5).json()
-        usd_try = float(resp['rates']['TRY'])
-        
-        url_eur = "https://api.exchangerate-api.com/v4/latest/EUR"
-        resp_eur = requests.get(url_eur, timeout=5).json()
-        eur_try = float(resp_eur['rates']['TRY'])
+        url = "https://api.exchangerate-api.com/v4/latest/USD"
+        resp = requests.get(url, timeout=5).json()
+        return float(resp['rates']['TRY'])
+    except: return 0.0
 
-        rates["USD"] = usd_try
-        rates["EUR"] = eur_try
-        return rates
-    except Exception as e:
-        print(f"Döviz hatası: {e}")
-        return rates
+def fetch_eur():
+    try:
+        url = "https://api.exchangerate-api.com/v4/latest/EUR"
+        resp = requests.get(url, timeout=5).json()
+        return float(resp['rates']['TRY'])
+    except: return 0.0
 
 def fetch_gold():
     url = f"https://anlikaltinfiyatlari.com/altin/kapalicarsi?v={random.random()}"
@@ -159,6 +156,7 @@ def update_assets(watchlist, current_cache):
         key = f"{item} FİYAT"
         price = 0.0
         
+        # Fon mu Hisse mi? (3-4 harfliyse ve . yoksa Fondur)
         if len(item) <= 4 and "." not in item:
             price = fetch_fund_single(item)
         else:
@@ -179,9 +177,11 @@ def main():
     sheet_client = connect_to_sheet()
     if not sheet_client: return
     
+    # 1. Takip Listesini Oku
     watchlist = get_watchlist(sheet_client)
-    
-    # 2. Sütun Yapısı (Senin manuel eklediğin yapıya uygun)
+    print(f"📋 Takip Listesi: {watchlist}")
+
+    # 2. Sütunları Hazırla
     base_cols = ["Tarih", "DOLAR KURU", "EURO KURU", "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ", 
                  "22 AYAR ALTIN ALIŞ", "22 AYAR ALTIN SATIŞ", "ATA ALTIN ALIŞ", 
                  "ATA ALTIN SATIŞ", "ÇEYREK ALTIN ALIŞ", "ÇEYREK ALTIN SATIŞ", 
@@ -192,30 +192,38 @@ def main():
     
     ws_data = sheet_client.sheet1
     
+    # Başlık Kontrolü
+    try:
+        current_headers = ws_data.row_values(1)
+        # Sadece eksik varsa ekle (Basit kontrol)
+        if len(current_headers) < len(full_columns) or current_headers[0] != "Tarih":
+             # Daha güvenli bir yöntem: 1. satırı tamamen güncelle
+             # Ancak sürekli sil-yaz yapmamak için sadece değişiklik varsa yapalım
+             if current_headers != full_columns:
+                 print("📝 Başlıklar güncelleniyor...")
+                 ws_data.clear() # Temiz sayfa daha güvenli başlık çakışması için
+                 ws_data.append_row(full_columns)
+    except: pass
+
     # 3. Verileri Çek
     cached_data = get_last_known_from_sheet(ws_data)
     cached_data = update_assets(watchlist, cached_data)
     gold = fetch_gold()
-    currencies = fetch_currencies()
+    usd = fetch_usd()
+    eur = fetch_eur()
     
     ts = tr_now.strftime("%Y-%m-%d %H:%M:%S")
-    
-    row_dict = {
-        "Tarih": ts, 
-        "DOLAR KURU": currencies.get("USD", 0.0),
-        "EURO KURU": currencies.get("EUR", 0.0)
-    }
-    
+    row_dict = {"Tarih": ts, "DOLAR KURU": usd, "EURO KURU": eur}
     if gold: row_dict.update(gold)
     row_dict.update(cached_data)
     
-    if currencies.get("USD", 0) > 0:
+    if gold:
         row_values = []
         for col in full_columns:
             row_values.append(row_dict.get(col, 0.0))
         try:
             ws_data.append_row(row_values, value_input_option='USER_ENTERED')
-            print(f"✅ KAYIT BAŞARILI. (USD: {currencies['USD']:.2f}, EUR: {currencies['EUR']:.2f})")
+            print(f"✅ KAYIT BAŞARILI.")
         except Exception as e:
             print(f"🔥 Yazma Hatası: {e}")
 
