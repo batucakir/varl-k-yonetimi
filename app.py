@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import numpy as np
+import yfinance as yf
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
@@ -112,6 +113,17 @@ def get_pct_change(df, col, minutes):
     old_price = closest_row.iloc[0][col]
     if old_price == 0: return 0.0
     return (current_price - old_price) / old_price
+
+# --- BENCHMARK MOTORU (YENİ) ---
+@st.cache_data(ttl=3600) # 1 saat cache
+def get_bist_data(start_date):
+    try:
+        # BIST 100 verisini çek
+        df_bist = yf.download("XU100.IS", start=start_date, progress=False)
+        if not df_bist.empty:
+            return df_bist['Close']
+        return pd.Series()
+    except: return pd.Series()
 
 # --- MAPPING ---
 def create_asset_mapping(watchlist):
@@ -222,6 +234,69 @@ def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
             tot += (qty * p)
         if tot > 0: trend_data.append({"Tarih": curr_date, "Toplam Servet": tot/rate})
     return pd.DataFrame(trend_data)
+
+# --- KIYASLAMA GRAFİĞİ HAZIRLAMA (YENİ) ---
+def render_benchmark_chart(df_trend, df_prices):
+    if df_trend.empty or df_prices.empty: return
+    
+    # 1. Verileri Günlük Baza İndirge (Resample)
+    df_port = df_trend.set_index("Tarih").resample("D").last().dropna()
+    df_market = df_prices.set_index("Tarih").resample("D").last().dropna()
+    
+    if df_port.empty: return
+    start_date = df_port.index.min()
+    
+    # 2. BIST 100 Çek
+    bist_series = get_bist_data(start_date)
+    
+    # 3. Ortak DataFrame Oluştur
+    df_bench = pd.DataFrame(index=df_port.index)
+    df_bench["Portföyüm"] = df_port["Toplam Servet"]
+    
+    # Tarihleri eşleştirerek diğer verileri ekle
+    # Reindex kullanarak tarihleri hizala (bazen haftasonu veri olmaz)
+    if not bist_series.empty:
+        # BIST verisinde timezone sorunu olabilir, tz_localize(None) ile çözelim
+        try: bist_series.index = bist_series.index.tz_localize(None)
+        except: pass
+        df_bench["BIST 100"] = bist_series.reindex(df_bench.index, method='ffill')
+        
+    df_bench["Dolar"] = df_market["DOLAR KURU"].reindex(df_bench.index, method='ffill')
+    df_bench["Gram Altın"] = df_market["GRAM ALTIN SATIŞ"].reindex(df_bench.index, method='ffill')
+    
+    # 4. Normalizasyon (Yüzdesel Değişim)
+    # İlk günkü değeri baz alıp % değişim hesapla: (Fiyat / İlk_Fiyat - 1) * 100
+    df_norm = df_bench.copy()
+    for col in df_norm.columns:
+        first_val = df_norm[col].iloc[0]
+        if first_val > 0:
+            df_norm[col] = (df_norm[col] / first_val - 1) * 100
+        else:
+            df_norm[col] = 0
+            
+    # 5. Çizim
+    fig = go.Figure()
+    
+    # Portföy (Kalın Yeşil)
+    fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["Portföyüm"], mode='lines', name='💎 Portföyüm', line=dict(color='#2E8B57', width=4)))
+    
+    # Kıyaslar
+    if "BIST 100" in df_norm.columns:
+        fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["BIST 100"], mode='lines', name='BIST 100', line=dict(color='#1f77b4', width=2)))
+    
+    fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["Dolar"], mode='lines', name='Dolar ($)', line=dict(color='#7f7f7f', width=2, dash='dot')))
+    fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm["Gram Altın"], mode='lines', name='Gram Altın', line=dict(color='#FFD700', width=2)))
+    
+    fig.update_layout(
+        title="🏆 Performans Kıyaslama (Başlangıçtan İtibaren % Getiri)",
+        xaxis_title="",
+        yaxis_title="Getiri (%)",
+        hovermode="x unified",
+        height=450,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def save_transaction(date_obj, tur, varlik, islem, adet, fiyat):
     try:
@@ -345,6 +420,11 @@ def main():
                             fig.update_layout(yaxis_range=[min_y, max_y], height=400, hovermode="x unified")
                             fig.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                             st.plotly_chart(fig, use_container_width=True, key=f"trend_{curr}")
+                            
+                            # --- 1. MADDE EKLENDİ: BENCHMARK GRAFİĞİ (SADECE TL SEKMESİNDE) ---
+                            if curr == "TL":
+                                st.divider()
+                                render_benchmark_chart(df_trend, df_prices)
                         
                         c1, c2 = st.columns(2)
                         with c1:
@@ -353,23 +433,21 @@ def main():
                             grp_col = "Grup" if grp_mode == "Ana Gruplar" else "Varlık"
                             df_pie = df_view.groupby(grp_col)["Net Değer"].sum().reset_index()
                             
-                            # --- RENK PALETİ AYARI (V59) ---
+                            # --- RENK PALETİ ---
                             if grp_mode == "Ana Gruplar":
-                                # Özel Renkler (Altın Sarısı Dahil)
                                 custom_colors = {"ALTIN": "#FFD700", "NAKİT": "#1f77b4", "FON": "#2ca02c", "HİSSE": "#d62728", "DÖVİZ": "#17becf"}
                                 fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color=grp_col, color_discrete_map=custom_colors)
                             else:
-                                # Detaylı Görünüm için Uyumlu Profesyonel Palet (Prism)
                                 fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism)
                                 
-                            fig_p.update_traces(textinfo="percent+label", textfont_size=18) # BÜYÜK YAZI
+                            fig_p.update_traces(textinfo="percent+label", textfont_size=18)
                             st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{curr}")
                         with c2:
                             st.subheader("Kâr/Zarar Durumu")
                             fig_b = go.Figure()
                             fig_b.add_trace(go.Bar(name='Maliyet', x=df_view['Varlık'], y=df_view['Maliyet'], marker_color='lightgrey'))
                             fig_b.add_trace(go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer'], marker_color='forestgreen'))
-                            fig_b.update_layout(xaxis_tickangle=0) # DÜZ YAZI
+                            fig_b.update_layout(xaxis_tickangle=0)
                             st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{curr}")
                         
                         st.subheader("🥇 Altın Makas")
