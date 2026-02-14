@@ -9,7 +9,37 @@ from datetime import datetime, timedelta
 import numpy as np
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+
+# --- ÖZEL CSS (GÖRÜNÜM İYİLEŞTİRME) ---
+st.markdown("""
+<style>
+    /* Metric Değerlerini Büyüt ve Renklendir */
+    [data-testid="stMetricValue"] {
+        font-size: 26px;
+        font-weight: bold;
+    }
+    /* Sidebar'daki Tabloları Düzenle */
+    .currency-card {
+        background-color: #262730;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #41444b;
+        margin-bottom: 10px;
+        text-align: center;
+    }
+    .currency-title {
+        font-size: 14px;
+        color: #b0b3b8;
+        margin-bottom: 5px;
+    }
+    .currency-value {
+        font-size: 22px;
+        font-weight: bold;
+        color: #ffffff;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
@@ -59,9 +89,10 @@ def load_data():
             
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             
-            # SMART FILL
+            # SMART FILL (Boşluk Doldurma)
             df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
             
+            # Son satır kontrolü
             if not df_prices.empty:
                 if df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                     df_prices = df_prices.iloc[:-1]
@@ -251,22 +282,39 @@ def main():
     df_prices, df_trans, watchlist = load_data()
     ASSET_MAPPING = create_asset_mapping(watchlist)
     
+    # --- SIDEBAR (YENİ TASARIM) ---
     with st.sidebar:
-        st.title("💎 Varlık Paneli")
-        page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"])
-        st.divider()
+        st.markdown("<h1 style='text-align: center; color: #4e8cff;'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
+        
+        # DÖVİZ KARTLARI (HTML ile) - Kesilmeyi önler
         if not df_prices.empty:
             last = df_prices.iloc[-1]
             usd = last.get("DOLAR KURU", 1.0)
             eur = last.get("EURO KURU", 1.0)
-            if eur == 0: eur = 1.0 # Hata önleyici
             
-            c1, c2 = st.columns(2)
-            c1.metric("USD", f"{usd:.2f} TL")
-            c2.metric("EUR", f"{eur:.2f} TL")
-        else: usd = 1.0; eur = 1.0
+            st.markdown(f"""
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <div class="currency-card" style="flex: 1;">
+                    <div class="currency-title">🇺🇸 USD</div>
+                    <div class="currency-value">{usd:.2f} ₺</div>
+                </div>
+                <div class="currency-card" style="flex: 1;">
+                    <div class="currency-title">🇪🇺 EUR</div>
+                    <div class="currency-value">{eur:.2f} ₺</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            usd, eur = 1.0, 1.0
+
+        # MENÜ
+        page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
         
-        if st.button("🔄 Yenile"): st.cache_data.clear(); st.rerun()
+        st.divider()
+        if st.button("🔄 Verileri Yenile", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+            
         with st.expander("➕ İşlem Ekle"):
             with st.form("add"):
                 f_date = st.date_input("Tarih", datetime.now())
@@ -276,30 +324,23 @@ def main():
                 f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
                 f_adet = st.number_input("Adet", min_value=0.0, step=0.01)
                 f_fiyat = st.number_input("Fiyat", min_value=0.0, step=0.01)
-                if st.form_submit_button("Kaydet"): save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
+                if st.form_submit_button("Kaydet", use_container_width=True): 
+                    save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
+        
         with st.expander("🛠️ Takip Listesi"):
             ns = st.text_input("Sembol (Örn: SASA.IS)")
-            if st.button("Ekle"): 
+            if st.button("Ekle", use_container_width=True): 
                 if add_to_watchlist_sheet(ns): st.success("Eklendi")
 
     # --- SAYFA 1: PORTFÖYÜM ---
     if page == "Portföyüm":
-        st.markdown("<h2 style='text-align: center;'>💎 Varlık Portföyü</h2>", unsafe_allow_html=True)
         if not df_trans.empty and not df_prices.empty:
             df_view, tot_wealth, tot_tax = calculate_portfolio(df_trans, df_prices)
             
-            # --- 3 TABLI YAPI (TL / USD / EUR) ---
+            # --- SEKMELER (TL/USD/EUR) ---
             tab1, tab2, tab3 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
-            
-            currencies = [("TL", 1.0), ("USD", usd), ("EUR", eur)]
-            
-            for i, (curr, rate) in enumerate(currencies):
-                # Doğru tabı seç
-                if i == 0: current_tab = tab1
-                elif i == 1: current_tab = tab2
-                else: current_tab = tab3
-                
-                with current_tab:
+            for t, curr, rate in [(tab1, "TL", 1.0), (tab2, "$", usd), (tab3, "€", eur)]:
+                with t:
                     if not df_view.empty:
                         net_profit = df_view["Net Kâr"].sum()
                         cost = df_view["Maliyet"].sum()
@@ -311,6 +352,7 @@ def main():
                             prev_val = df_trend.iloc[-2]["Toplam Servet"]
                             diff_pct = (curr_val - prev_val) / prev_val * 100
                         
+                        # ANA KPI KARTLARI
                         c1, c2, c3 = st.columns(3)
                         c1.metric("Toplam Varlık", f"{format_tr_money(tot_wealth/rate)} {curr}", f"Vergi: -{format_tr_money(tot_tax/rate)} {curr}", delta_color="inverse")
                         c2.metric("Net Kâr", f"{format_tr_money(net_profit/rate)} {curr}", f"{format_tr_percent(diff_pct)} (Son Değişim)")
