@@ -1,0 +1,27 @@
+name: Tek Seferlik Gecmis Veri Doldurma
+
+on:
+  workflow_dispatch: # Bu satır, GitHub arayüzünden manuel "Çalıştır" butonu sağlar
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu Çek
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install gspread oauth2client yfinance pandas
+
+      - name: Credentials Dosyasını Oluştur
+        run: |
+          echo "${{ secrets.GCP_SERVICE_ACCOUNT }}" > credentials.json
+
+      - name: Gecmis Veriyi Doldur
+        run: python history_filler.py
