@@ -62,7 +62,6 @@ def load_data():
             # SMART FILL
             df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
             
-            # Son satır kontrolü
             if not df_prices.empty:
                 if df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                     df_prices = df_prices.iloc[:-1]
@@ -315,16 +314,11 @@ def main():
                         df_show = df_view.copy()
                         for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi"]: df_show[c] = df_show[c] / rate
                         df_show["Kâr %"] = df_show.apply(lambda x: x["Net Kâr"]/x["Maliyet"]*100 if x["Maliyet"]>0 else 0, axis=1)
-                        
-                        # --- HASSASİYET AYARI (BURADA DÜZELTİLDİ) ---
                         st.dataframe(df_show.style.format({
                             "Adet": "{:,.0f}", 
-                            "Fiyat": "{:,.6f}",  # 6 basamak hassasiyet
+                            "Fiyat": "{:,.6f}",  # 6 digit
                             "Maliyet": "{:,.2f}",
-                            "Net Değer": "{:,.2f}", 
-                            "Net Kâr": "{:,.2f}", 
-                            "Vergi": "{:,.2f}", 
-                            "Kâr %": "%{:,.2f}"
+                            "Net Değer": "{:,.2f}", "Net Kâr": "{:,.2f}", "Vergi": "{:,.2f}", "Kâr %": "%{:,.2f}"
                         }), use_container_width=True, hide_index=True)
                         st.divider()
                         
@@ -363,17 +357,20 @@ def main():
                             pct_m = makas/satis*100 if satis>0 else 0
                             gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{pct_m:.2f})", delta_color="inverse")
 
-    # --- SAYFA 2: PİYASA TAKİP (HATASI GİDERİLDİ) ---
+    # --- SAYFA 2: PİYASA TAKİP ---
     elif page == "Piyasa Takip":
         st.markdown("## 🌍 Detaylı Piyasa Analizi")
         if not df_prices.empty:
             
             market_data = []
+            
+            # --- ZAMAN DİLİMLERİ ---
             intervals = {
                 "10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360,
                 "1 Gün": 1440, "3 Gün": 4320, "1 Hafta": 10080, "2 Hafta": 20160,
                 "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600
             }
+            
             cols = list(df_prices.columns)
             for col in cols:
                 if col == "Tarih": continue
@@ -381,41 +378,55 @@ def main():
                     clean_name = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "")
                     series = df_prices[col]
                     current_price = series.iloc[-1]
+                    
                     rsi = 50.0
                     try: rsi = calculate_rsi(series).iloc[-1]
                     except: pass
+                    
                     row_data = {
-                        "Enstrüman": clean_name, "Fiyat": current_price, "RSI": rsi,
+                        "Enstrüman": clean_name,
+                        "Fiyat": current_price,
+                        "RSI": rsi,
                         "Trend": series.tail(30).tolist()
                     }
+                    
                     for label, mins in intervals.items():
                         row_data[label] = get_pct_change(df_prices, col, mins)
+                        
                     market_data.append(row_data)
             
             df_m = pd.DataFrame(market_data)
+            
+            # --- SEKMELER ---
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
             
-            # --- DİNAMİK KOLON AYARI (fixed=True kaldırıldı) ---
+            # Dinamik Konfigürasyon
             col_config = {
                 "Enstrüman": st.column_config.TextColumn("Varlık", width="small"),
                 "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.6f TL"),
                 "RSI": st.column_config.NumberColumn("RSI", format="%.0f"),
                 "Trend": st.column_config.LineChartColumn("Trend (30 Veri)", y_min=0, width="small"),
             }
+            
             for label in intervals.keys():
                 col_config[label] = st.column_config.NumberColumn(label, format="%.2f %%")
 
             def show_detailed_table(keyword):
-                if keyword == "Hisse": filt = [x for x in market_data if ".IS" in x["Enstrüman"] or "Hisse" in x.get("Türü", "")]
-                elif keyword == "Fon": filt = [x for x in market_data if len(x["Enstrüman"]) <= 4 and "." not in x["Enstrüman"]]
-                else: filt = [x for x in market_data if "ALTIN" in x["Enstrüman"] or "DOLAR" in x["Enstrüman"]]
-                
-                # Pandas filtreleme
-                if keyword == "Hisse": df_show = df_m[df_m["Enstrüman"].str.contains(".IS")]
-                elif keyword == "Fon": df_show = df_m[df_m["Enstrüman"].apply(lambda x: len(str(x))<=4 and "." not in str(x))]
-                else: df_show = df_m[df_m["Enstrüman"].str.contains("ALTIN|DOLAR")]
+                if keyword == "Hisse": 
+                    df_show = df_m[df_m["Enstrüman"].str.contains(".IS", na=False)]
+                elif keyword == "Fon": 
+                    # Fonlar için kısa vadeli değişimler anlamsız, onları gizleyelim
+                    df_show = df_m[df_m["Enstrüman"].apply(lambda x: len(str(x))<=4 and "." not in str(x))]
+                    # Fonlarda anlık değişimleri göstermeyelim
+                    display_cols = ["Enstrüman", "Fiyat", "RSI", "Trend"] + [k for k in intervals.keys() if "Dk" not in k and "Saat" not in k]
+                    df_show = df_show[display_cols]
+                else: 
+                    df_show = df_m[df_m["Enstrüman"].str.contains("ALTIN|DOLAR", na=False)]
 
-                if df_show.empty: st.info("Veri yok."); return
+                if df_show.empty:
+                    st.info("Veri yok.")
+                    return
+                
                 st.dataframe(df_show, column_config=col_config, use_container_width=True, hide_index=True)
 
             with t1: show_detailed_table("Hisse")
