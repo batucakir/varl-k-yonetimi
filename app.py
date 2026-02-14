@@ -72,7 +72,8 @@ def load_data():
             df_prices = pd.DataFrame(data_prices[1:], columns=data_prices[0])
             df_prices.columns = df_prices.columns.str.strip()
             
-            # --- AGRESİF SAYI TEMİZLİĞİ ---
+            # --- KRİTİK: AGRESİF SAYI ONARICI (V76) ---
+            # Excel'den gelen "731,50" veya "14.86" gibi her türlü formatı temizler
             for col in df_prices.columns:
                 if col != "Tarih":
                     df_prices[col] = df_prices[col].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
@@ -118,11 +119,18 @@ def calculate_rsi(series, period=14):
 
 def get_pct_change(df, col, minutes):
     if df.empty or len(df) < 2: return 0.0
+    # Veriyi float'a zorla (V76 TRHOL Fix)
     current_price = float(df.iloc[-1][col])
     target_time = df.iloc[-1]['Tarih'] - timedelta(minutes=minutes)
     past_df = df[df['Tarih'] <= target_time]
-    old_price = float(past_df.iloc[-1][col]) if not past_df.empty else float(df.iloc[0][col])
+    
+    if past_df.empty: 
+        old_price = float(df.iloc[0][col])
+    else:
+        old_price = float(past_df.iloc[-1][col])
+        
     if old_price == 0: return 0.0
+    # Matematiksel kesin formül: (Yeni - Eski) / Eski
     return (current_price - old_price) / old_price
 
 @st.cache_data(ttl=3600)
@@ -209,7 +217,7 @@ def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
         tot = 0
         for _, asset in current_assets.iterrows():
             v = asset['Varlık']
-            # Nakit Koruyucu ve Adet Fallback (1.8M Fix)
+            # Nakit Koruyucu (1.8M Fix): İşlem yoksa bugünkü adetleri fallback al
             qty = running_port.get(v, asset['Adet']) 
             if qty <= 0.001: continue
             tot += (qty * find_smart_price(pr, v))
@@ -361,23 +369,24 @@ def main():
     elif page == "Piyasa Takip" and not df_prices.empty:
         st.markdown("## 🌍 Detaylı Piyasa Analizi")
         market_data = []
-        intervals = {"10 Dk": 10, "1 Saat": 60, "1 Gün": 1440, "1 Hafta": 10080, "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600}
+        ivs = {"10 Dk": 10, "1 Saat": 60, "1 Gün": 1440, "1 Hafta": 10080, "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600}
         for col in df_prices.columns:
             if col in ["Tarih", "D"]: continue
             if any(x in col for x in ["FİYAT", "ALTIN", "DOLAR", "KURU"]):
                 clean_name, series = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", ""), df_prices[col].replace(0, np.nan).ffill()
                 if series.empty: continue
                 row = {"Varlık": clean_name, "Fiyat": series.iloc[-1], "RSI": calculate_rsi(series).iloc[-1], "Trend": series.tail(30).tolist()}
-                for label, mins in intervals.items(): row[f"{label} Değişim"] = get_pct_change(df_prices, col, mins)
+                for label, mins in ivs.items(): row[f"{label} Değişim"] = get_pct_change(df_prices, col, mins)
                 market_data.append(row)
         df_m = pd.DataFrame(market_data)
         
+        # YEŞİL/KIRMIZI BOLD FONKSİYONU
         def color_change(val):
             color = '#00FF00' if val > 0.0001 else '#FF4B4B' if val < -0.0001 else 'white'
             return f'color: {color}; font-weight: bold'
 
         col_config = {"Varlık": st.column_config.TextColumn("Varlık", width="small"), "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.4f TL"), "RSI": st.column_config.NumberColumn("RSI", format="%.0f"), "Trend": st.column_config.LineChartColumn("Trend", y_min=0, width="small")}
-        for k in intervals.keys(): col_config[f"{k} Değişim"] = st.column_config.NumberColumn(f"{k} Değişim", format="%.2f %%")
+        for k in ivs.keys(): col_config[f"{k} Değişim"] = st.column_config.NumberColumn(f"{k} Değişim", format="%.2f %%")
         
         t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
         def show_table(keyword):
