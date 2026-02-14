@@ -17,19 +17,34 @@ HEDEF_SERVET_TL = 2000000
 HEDEF_TARIH = datetime(2026, 2, 28)
 FON_VERGI_ORANI = 0.175
 
-# VARLIK EŞLEŞTİRME
+# --- VARLIK LİSTELERİ (BOT İLE AYNI) ---
+MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
+BIST_30 = [
+    "AKBNK", "ALARK", "ARCLK", "ASELS", "ASTOR", "BIMAS", "BRSAN", 
+    "DOAS", "EKGYO", "ENKAI", "EREGL", "FROTO", "GARAN", "GUBRF", 
+    "HEKTS", "ISCTR", "KCHOL", "KONTR", "KOZAL", "KRDMD", "OYAKC", 
+    "PETKM", "PGSUS", "SAHOL", "SASA", "SISE", "TCELL", "THYAO", 
+    "TOASO", "TUPRS", "YKBNK"
+]
+MY_EXTRAS = ["TERA", "TRHOL", "TEHOL", "IEYHO", "ODINE", "MIATK", "HEDEF"]
+ALL_STOCK_CODES = sorted(list(set(BIST_30 + MY_EXTRAS)))
+
+# --- ASSET MAPPING OLUŞTURMA (OTOMATİK) ---
+# Manuel Eklenenler
 ASSET_MAPPING = {
     "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
     "ATA ALTIN (Adet)": "ATA ALTIN ALIŞ",
     "ÇEYREK ALTIN (Adet)": "ÇEYREK ALTIN ALIŞ",
-    "TLY FONU": "TLY FİYAT",
-    "DFI FONU": "DFI FİYAT",
-    "TP2 FONU": "TP2 FİYAT",
-    "PHE FONU": "PHE FİYAT",
-    "ROF FONU": "ROF FİYAT",
-    "PBR FONU": "PBR FİYAT",
-    "TL Bakiye": "NAKİT" 
+    "TL Bakiye": "NAKİT"
 }
+# Fonları Ekle
+for f in MY_FUNDS:
+    ASSET_MAPPING[f"{f} FONU"] = f"{f} FİYAT"
+
+# Hisseleri Ekle (Otomatik)
+for s in ALL_STOCK_CODES:
+    # Ekranda "THYAO (Hisse)" görünsün, Botta "THYAO.IS FİYAT" aransın
+    ASSET_MAPPING[f"{s} (Hisse)"] = f"{s}.IS FİYAT"
 
 # --- FORMATLAMA ---
 def format_tr_money(value):
@@ -134,7 +149,7 @@ def calculate_current_portfolio(df_trans):
             else: curr["adet"] -= adet
     return portfolio
 
-# --- ZAMAN MAKİNESİ (GRAFİK İÇİN) ---
+# --- ZAMAN MAKİNESİ ---
 def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
     if df_prices.empty: return pd.DataFrame()
     df_prices = df_prices.sort_values("Tarih").reset_index(drop=True)
@@ -169,7 +184,6 @@ def prepare_true_historical_trend(df_prices, df_trans, rate=1.0):
             price = 1.0 if price_key == "NAKİT" else price_row.get(price_key, 0)
             total_wealth += (adet * price)
         
-        # Sadece 0'dan büyük değerleri al (Grafiği bozmamak için)
         if total_wealth > 0:
             trend_data.append({"Tarih": current_date, "Toplam Servet": total_wealth / rate})
         
@@ -245,7 +259,8 @@ def main():
             with st.expander("➕ Yeni İşlem Ekle", expanded=False):
                 with st.form("transaction_form"):
                     f_date = st.date_input("Tarih", datetime.now())
-                    f_tur = st.selectbox("Tür", ["ALTIN", "FON", "NAKİT", "DÖVİZ"])
+                    f_tur = st.selectbox("Tür", ["ALTIN", "FON", "HİSSE", "NAKİT", "DÖVİZ"])
+                    # GÜNCEL VARLIK LİSTESİ (HİSSELER DAHİL)
                     asset_options = list(ASSET_MAPPING.keys())
                     f_varlik = st.selectbox("Varlık", asset_options)
                     f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
@@ -320,59 +335,29 @@ def main():
                     }), use_container_width=True, hide_index=True)
                     st.divider()
 
-                    # --- GÜNCELLENMİŞ GRAFİK (AREA + ZOOM) ---
                     st.subheader(f"📈 Gerçek Tarihsel Servet Değişimi ({currency})")
                     df_trend = prepare_true_historical_trend(df_prices, df_trans, rate)
                     if not df_trend.empty:
-                        # Tekrar Area Chart'a döndük (Dolgun görünüm)
                         fig_t = px.area(df_trend, x="Tarih", y="Toplam Servet")
-                        
-                        # Y Ekseni: En düşük değerden başlasın (Zoom etkisi)
                         min_y = df_trend["Toplam Servet"].min() * 0.999
                         max_y = df_trend["Toplam Servet"].max() * 1.001
-                        
-                        fig_t.update_layout(
-                            xaxis_title=None, 
-                            yaxis_title=None, 
-                            height=450, 
-                            hovermode="x unified", 
-                            showlegend=False, 
-                            yaxis_range=[min_y, max_y] # Kritik ayar burası
-                        )
-                        # Range slider'ı kaldırdık (grafiği inceltiyor), mouse zoom'u yeterli
+                        fig_t.update_layout(xaxis_title=None, yaxis_title=None, height=450, hovermode="x unified", showlegend=False, yaxis_range=[min_y, max_y])
                         fig_t.update_traces(line_color='#2E8B57', fillcolor='rgba(46, 139, 87, 0.2)')
                         st.plotly_chart(fig_t, use_container_width=True, key=f"trend_{currency}_{uuid.uuid4()}")
                     st.divider()
 
-                    # --- GÜNCELLENMİŞ PASTA GRAFİĞİ (TÜRKÇE FORMAT & BOLD) ---
                     g1, g2 = st.columns(2)
                     with g1:
                         st.subheader("Varlık Dağılımı")
                         dagilim_tipi = st.radio("Görünüm Modu:", ["Ana Gruplar (Altın/Fon/Nakit)", "Detaylı Varlıklar"], horizontal=True, key=f"rad_{currency}")
-                        
                         if dagilim_tipi == "Ana Gruplar (Altın/Fon/Nakit)": col_name = 'Grup'
                         else: col_name = 'Varlık'
-                        
-                        # Veriyi gruplayıp yüzdeleri hesaplayalım (Etiket için)
                         df_pie = df_view.groupby(col_name)["Net Servet"].sum().reset_index()
                         total_pie = df_pie["Net Servet"].sum()
                         df_pie["Yuzde"] = (df_pie["Net Servet"] / total_pie * 100)
-                        
-                        # Özel Türkçe Etiket Oluşturma (Lambda fonksiyonu ile)
-                        # Örnek Çıktı: "ALTIN<br>%35,20" (Kalın ve virgüllü)
-                        df_pie["Etiket"] = df_pie.apply(
-                            lambda x: f"<b>{x[col_name]}</b><br>%{str(f'{x.Yuzde:.2f}').replace('.', ',')}", 
-                            axis=1
-                        )
-
+                        df_pie["Etiket"] = df_pie.apply(lambda x: f"<b>{x[col_name]}</b><br>%{str(f'{x.Yuzde:.2f}').replace('.', ',')}", axis=1)
                         fig_p = px.pie(df_pie, values='Net Servet', names=col_name, hole=0.5)
-                        
-                        # Plotly'e "Bizim oluşturduğumuz 'Etiket' sütununu kullan" diyoruz
-                        fig_p.update_traces(
-                            text=df_pie["Etiket"],
-                            textinfo='text',  # Otomatik hesaplama yerine bizim text'i kullan
-                            textfont_size=17, # Daha büyük yazı
-                        )
+                        fig_p.update_traces(text=df_pie["Etiket"], textinfo='text', textfont_size=17)
                         st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{currency}_{uuid.uuid4()}")
                         
                     with g2:
