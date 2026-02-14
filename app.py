@@ -11,33 +11,16 @@ import numpy as np
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
-# --- ÖZEL CSS (GÖRÜNÜM İYİLEŞTİRME) ---
+# --- ÖZEL CSS ---
 st.markdown("""
 <style>
-    /* Metric Değerlerini Büyüt ve Renklendir */
-    [data-testid="stMetricValue"] {
-        font-size: 26px;
-        font-weight: bold;
-    }
-    /* Sidebar'daki Tabloları Düzenle */
+    [data-testid="stMetricValue"] { font-size: 26px; font-weight: bold; }
     .currency-card {
-        background-color: #262730;
-        padding: 10px;
-        border-radius: 10px;
-        border: 1px solid #41444b;
-        margin-bottom: 10px;
-        text-align: center;
+        background-color: #262730; padding: 10px; border-radius: 10px;
+        border: 1px solid #41444b; margin-bottom: 10px; text-align: center;
     }
-    .currency-title {
-        font-size: 14px;
-        color: #b0b3b8;
-        margin-bottom: 5px;
-    }
-    .currency-value {
-        font-size: 22px;
-        font-weight: bold;
-        color: #ffffff;
-    }
+    .currency-title { font-size: 14px; color: #b0b3b8; margin-bottom: 5px; }
+    .currency-value { font-size: 22px; font-weight: bold; color: #ffffff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -75,31 +58,22 @@ def load_data():
         client = get_client()
         sheet = client.open(SHEET_NAME)
         
-        # 1. Fiyatlar
         ws_prices = sheet.sheet1 
         data_prices = ws_prices.get_all_values()
         if len(data_prices) > 1:
             df_prices = pd.DataFrame(data_prices[1:], columns=data_prices[0])
             df_prices.columns = df_prices.columns.str.strip()
-            
             for col in df_prices.columns:
                 if col != "Tarih":
                     df_prices[col] = df_prices[col].astype(str).str.replace(",", ".")
                     df_prices[col] = pd.to_numeric(df_prices[col], errors='coerce')
-            
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
-            
-            # SMART FILL (Boşluk Doldurma)
             df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
-            
-            # Son satır kontrolü
             if not df_prices.empty:
                 if df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                     df_prices = df_prices.iloc[:-1]
-
         else: df_prices = pd.DataFrame()
 
-        # 2. İşlemler
         try:
             ws_trans = sheet.worksheet("Islemler")
             data_trans = ws_trans.get_all_values()
@@ -112,7 +86,6 @@ def load_data():
             else: df_trans = pd.DataFrame()
         except: df_trans = pd.DataFrame()
 
-        # 3. Takip Listesi
         try:
             ws_conf = sheet.worksheet(CONFIG_SHEET_NAME)
             vals = ws_conf.col_values(1)
@@ -140,7 +113,7 @@ def get_pct_change(df, col, minutes):
     if old_price == 0: return 0.0
     return (current_price - old_price) / old_price
 
-# --- MAPPING & FİYAT ---
+# --- MAPPING ---
 def create_asset_mapping(watchlist):
     mapping = {
         "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
@@ -282,16 +255,12 @@ def main():
     df_prices, df_trans, watchlist = load_data()
     ASSET_MAPPING = create_asset_mapping(watchlist)
     
-    # --- SIDEBAR (YENİ TASARIM) ---
     with st.sidebar:
         st.markdown("<h1 style='text-align: center; color: #4e8cff;'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
-        
-        # DÖVİZ KARTLARI (HTML ile) - Kesilmeyi önler
         if not df_prices.empty:
             last = df_prices.iloc[-1]
             usd = last.get("DOLAR KURU", 1.0)
             eur = last.get("EURO KURU", 1.0)
-            
             st.markdown(f"""
             <div style="display: flex; gap: 10px; margin-bottom: 20px;">
                 <div class="currency-card" style="flex: 1;">
@@ -304,17 +273,11 @@ def main():
                 </div>
             </div>
             """, unsafe_allow_html=True)
-        else:
-            usd, eur = 1.0, 1.0
-
-        # MENÜ
-        page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
+        else: usd, eur = 1.0, 1.0
         
+        page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
         st.divider()
-        if st.button("🔄 Verileri Yenile", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-            
+        if st.button("🔄 Verileri Yenile", use_container_width=True): st.cache_data.clear(); st.rerun()
         with st.expander("➕ İşlem Ekle"):
             with st.form("add"):
                 f_date = st.date_input("Tarih", datetime.now())
@@ -324,9 +287,7 @@ def main():
                 f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
                 f_adet = st.number_input("Adet", min_value=0.0, step=0.01)
                 f_fiyat = st.number_input("Fiyat", min_value=0.0, step=0.01)
-                if st.form_submit_button("Kaydet", use_container_width=True): 
-                    save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
-        
+                if st.form_submit_button("Kaydet", use_container_width=True): save_transaction(f_date, f_tur, f_varlik, f_islem, f_adet, f_fiyat)
         with st.expander("🛠️ Takip Listesi"):
             ns = st.text_input("Sembol (Örn: SASA.IS)")
             if st.button("Ekle", use_container_width=True): 
@@ -337,7 +298,6 @@ def main():
         if not df_trans.empty and not df_prices.empty:
             df_view, tot_wealth, tot_tax = calculate_portfolio(df_trans, df_prices)
             
-            # --- SEKMELER (TL/USD/EUR) ---
             tab1, tab2, tab3 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
             for t, curr, rate in [(tab1, "TL", 1.0), (tab2, "$", usd), (tab3, "€", eur)]:
                 with t:
@@ -352,7 +312,6 @@ def main():
                             prev_val = df_trend.iloc[-2]["Toplam Servet"]
                             diff_pct = (curr_val - prev_val) / prev_val * 100
                         
-                        # ANA KPI KARTLARI
                         c1, c2, c3 = st.columns(3)
                         c1.metric("Toplam Varlık", f"{format_tr_money(tot_wealth/rate)} {curr}", f"Vergi: -{format_tr_money(tot_tax/rate)} {curr}", delta_color="inverse")
                         c2.metric("Net Kâr", f"{format_tr_money(net_profit/rate)} {curr}", f"{format_tr_percent(diff_pct)} (Son Değişim)")
@@ -393,14 +352,26 @@ def main():
                             grp_mode = st.radio("Görünüm", ["Ana Gruplar", "Detaylı"], horizontal=True, key=f"rad_{curr}")
                             grp_col = "Grup" if grp_mode == "Ana Gruplar" else "Varlık"
                             df_pie = df_view.groupby(grp_col)["Net Değer"].sum().reset_index()
-                            fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4)
-                            fig_p.update_traces(textinfo="percent+label")
+                            
+                            # --- RENK PALETİ VE YAZI BOYUTU AYARI ---
+                            custom_colors = {
+                                "ALTIN": "#FFD700",  # Gerçek Altın Sarısı
+                                "NAKİT": "#1f77b4", 
+                                "FON": "#2ca02c",   
+                                "HİSSE": "#d62728",
+                                "DÖVİZ": "#17becf"
+                            }
+                            fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color=grp_col, color_discrete_map=custom_colors)
+                            fig_p.update_traces(textinfo="percent+label", textfont_size=18) # BÜYÜK YAZI
+                            
                             st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{curr}")
                         with c2:
                             st.subheader("Kâr/Zarar Durumu")
                             fig_b = go.Figure()
                             fig_b.add_trace(go.Bar(name='Maliyet', x=df_view['Varlık'], y=df_view['Maliyet'], marker_color='lightgrey'))
                             fig_b.add_trace(go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer'], marker_color='forestgreen'))
+                            # --- YAZILARI DÜZELTME ---
+                            fig_b.update_layout(xaxis_tickangle=0) # DÜZ YAZI
                             st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{curr}")
                         
                         st.subheader("🥇 Altın Makas")
