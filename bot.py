@@ -13,11 +13,10 @@ import yfinance as yf
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
 
-# 1. MEVCUT FONLAR
+# 1. FONLAR
 MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
 
-# 2. HİSSE SENETLERİ LİSTESİ (BIST 30 + SENİN EKSTRALARIN)
-# Not: Yfinance için sonlarına .IS ekliyoruz.
+# 2. HİSSELER (BIST 30 + SENİN LİSTEN)
 BIST_30 = [
     "AKBNK.IS", "ALARK.IS", "ARCLK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", "BRSAN.IS", 
     "DOAS.IS", "EKGYO.IS", "ENKAI.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "GUBRF.IS", 
@@ -30,11 +29,9 @@ MY_EXTRAS = [
     "TERA.IS", "TRHOL.IS", "TEHOL.IS", "IEYHO.IS", "ODINE.IS", "MIATK.IS", "HEDEF.IS"
 ]
 
-# Hepsini Birleştiriyoruz (Tekrarları önlemek için set kullandık, sonra listeye çevirdik)
 ALL_STOCKS = sorted(list(set(BIST_30 + MY_EXTRAS)))
 
-# --- SÜTUN SIRASI OLUŞTURMA (DİNAMİK) ---
-# Sabit kısımlar
+# --- SÜTUN YAPISI ---
 BASE_COLUMNS = [
     "Tarih", "DOLAR KURU",
     "GRAM ALTIN ALIŞ", "GRAM ALTIN SATIŞ",
@@ -44,13 +41,8 @@ BASE_COLUMNS = [
     "ALTIN ONS ALIŞ", "ALTIN ONS SATIŞ"
 ]
 
-# Fon Sütunlarını ekle
 FUND_COLUMNS = [f"{code} FİYAT" for code in MY_FUNDS]
-
-# Hisse Sütunlarını ekle
 STOCK_COLUMNS = [f"{ticker} FİYAT" for ticker in ALL_STOCKS]
-
-# Hepsini Birleştir
 SUTUN_SIRASI = BASE_COLUMNS + FUND_COLUMNS + STOCK_COLUMNS
 
 USER_AGENTS = [
@@ -136,7 +128,7 @@ def fetch_fund_single(code):
     url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
     headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
     try:
-        time.sleep(0.5) 
+        time.sleep(0.2) 
         resp = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
         top_list = soup.find("ul", class_="top-list")
@@ -150,66 +142,58 @@ def fetch_fund_single(code):
     except: return 0.0
 
 def fetch_stock_price(ticker):
-    """Yahoo Finance'den Hisse Çeker"""
     try:
         stock = yf.Ticker(ticker)
-        # fast_info daha hızlıdır
-        price = stock.fast_info['last_price']
-        return float(price) if price else 0.0
+        # Hafta sonu olduğu için son kapanış fiyatını (history) alacağız
+        hist = stock.history(period="1d")
+        if not hist.empty:
+            return float(hist['Close'].iloc[-1])
+        return 0.0
     except: return 0.0
 
 def update_all_assets(current_cache):
-    print("\n🌍 VARLIK GÜNCELLEMESİ BAŞLADI (Cloud)...")
+    print("\n🌍 VARLIK GÜNCELLEMESİ BAŞLADI (Development Mode)...")
     new_cache = current_cache.copy()
     
     # 1. Fonlar
-    print("   📊 Fonlar güncelleniyor...")
     for code in MY_FUNDS:
         key = f"{code} FİYAT"
         price = fetch_fund_single(code)
         if price > 0: new_cache[key] = price
-        else: new_cache[key] = new_cache.get(key, 0) # Eskiyi koru
+        else: new_cache[key] = new_cache.get(key, 0)
 
     # 2. Hisseler
-    print("   📈 Hisseler güncelleniyor...")
+    print(f"   📈 {len(ALL_STOCKS)} Hisse taranıyor...")
     for ticker in ALL_STOCKS:
         key = f"{ticker} FİYAT"
         price = fetch_stock_price(ticker)
-        if price > 0: new_cache[key] = price
-        else: new_cache[key] = new_cache.get(key, 0) # Eskiyi koru
-        # Çok hızlı istek atıp engellenmemek için minik bekleme
-        time.sleep(0.1)
-
+        if price > 0:
+            new_cache[key] = price
+            # print(f"✅ {ticker}: {price}") # Log kirliliği olmasın diye kapattım
+        else:
+            new_cache[key] = new_cache.get(key, 0)
+    
     print("🌍 Tamamlandı.\n")
     return new_cache
 
 def main():
-    # --- AKILLI ZAMANLAMA ---
+    # --- UYKU MODU İPTAL EDİLDİ ---
+    # Geliştirme aşamasında her tetiklendiğinde çalışsın.
     tr_now = datetime.utcnow() + timedelta(hours=3)
-    hour = tr_now.hour
-    minute = tr_now.minute
-    weekday = tr_now.weekday() 
-    is_weekend = (weekday >= 5) 
-    is_work_hours = (9 <= hour <= 19) 
-    
-    if (is_weekend or not is_work_hours):
-        if minute > 5:
-            print(f"💤 Uyku Modu: {tr_now.strftime('%H:%M')} (Piyasa kapalı)")
-            return
-
     print(f"🤖 BOT ÇALIŞIYOR... (Saat: {tr_now.strftime('%H:%M')})")
     
     sheet = connect_to_sheet()
     if not sheet: return
 
-    # Sütunları Kontrol Et ve Güncelle (Yeni hisse eklendiyse genişlet)
+    # --- SÜTUN KONTROLÜ (KRİTİK) ---
+    # Eğer Excel'deki başlıklar eksikse, başlıkları yenile.
     try:
         current_headers = sheet.row_values(1)
         if len(current_headers) < len(SUTUN_SIRASI):
-            print("📝 Yeni varlıklar tespit edildi, tablo genişletiliyor...")
-            # Mevcut başlıkları silip yenisini yazıyoruz
+            print("📝 YENİ HİSSELER TESPİT EDİLDİ! Tablo başlıkları güncelleniyor...")
             sheet.delete_row(1)
             sheet.insert_row(SUTUN_SIRASI, 1)
+            print("✅ Başlıklar güncellendi.")
     except: pass
 
     cached_data = get_last_known_from_sheet(sheet)
