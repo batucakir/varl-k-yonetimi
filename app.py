@@ -77,7 +77,6 @@ def load_data():
         # 3. Takip Listesi (Ayarlar)
         try:
             ws_conf = sheet.worksheet(CONFIG_SHEET_NAME)
-            # A sütununu al (Başlık hariç)
             vals = ws_conf.col_values(1)
             watchlist = [x for x in vals[1:] if x]
         except: watchlist = []
@@ -85,23 +84,30 @@ def load_data():
         return df_prices, df_trans, watchlist
     except: return pd.DataFrame(), pd.DataFrame(), []
 
-# --- DİNAMİK MAPPING OLUŞTURUCU ---
+# --- DİNAMİK MAPPING OLUŞTURUCU (DÜZELTİLDİ) ---
 def create_asset_mapping(watchlist):
+    # 1. SABİT VARLIKLAR (Bunlar her zaman çalışmalı)
     mapping = {
         "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
         "ATA ALTIN (Adet)": "ATA ALTIN ALIŞ",
         "ÇEYREK ALTIN (Adet)": "ÇEYREK ALTIN ALIŞ",
-        "TL Bakiye": "NAKİT"
+        "TL Bakiye": "NAKİT",
+        # FONLAR BURAYA SABİTLENDİ (HATA ÇÖZÜMÜ)
+        "TLY FONU": "TLY FİYAT",
+        "DFI FONU": "DFI FİYAT",
+        "TP2 FONU": "TP2 FİYAT",
+        "PHE FONU": "PHE FİYAT",
+        "ROF FONU": "ROF FİYAT",
+        "PBR FONU": "PBR FİYAT"
     }
-    # Watchlist'tekileri ekle
+    
+    # 2. DİNAMİK LİSTE (Hisseler İçin)
     for item in watchlist:
-        # Eğer Fon ise (3 harfli genelde)
-        if len(item) <= 4 and "." not in item:
-            mapping[f"{item} FONU"] = f"{item} FİYAT"
-        else:
-            # Hisse ise (THYAO.IS)
+        # Hisse ise (THYAO.IS)
+        if ".IS" in item:
             clean_name = item.replace(".IS", "")
             mapping[f"{clean_name} (Hisse)"] = f"{item} FİYAT"
+            
     return mapping
 
 # --- HESAPLAMA MOTORLARI ---
@@ -281,7 +287,7 @@ def main():
                 if add_to_watchlist_sheet(new_sym): st.success("Eklendi! Bot bir dahaki sefere çekecek.")
                 else: st.warning("Zaten var veya hata.")
 
-    # --- SAYFA 1: PORTFÖY (V37 Görünümüne Dönüş) ---
+    # --- SAYFA 1: PORTFÖY ---
     if page == "Portföyüm":
         st.markdown("<h2 style='text-align: center;'>💎 Varlık Portföyü</h2>", unsafe_allow_html=True)
         if not df_trans.empty and not df_prices.empty:
@@ -390,7 +396,7 @@ def main():
                             yuzde = makas/satis*100 if satis>0 else 0
                             gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{yuzde:.2f})", delta_color="inverse")
 
-    # --- SAYFA 2: PİYASA TAKİP (Düzeltilmiş Tablo) ---
+    # --- SAYFA 2: PİYASA TAKİP ---
     elif page == "Piyasa Takip":
         st.markdown("<h2 style='text-align: center;'>🌍 Piyasa İzleme</h2>", unsafe_allow_html=True)
         if not df_prices.empty:
