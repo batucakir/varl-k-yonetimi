@@ -8,8 +8,8 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import numpy as np
 
-# --- SAYFA AYARLARI (GENİŞ MOD) ---
-st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="collapsed")
+# --- SAYFA AYARLARI ---
+st.set_page_config(page_title="Kişisel Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
@@ -31,11 +31,6 @@ def format_tr_percent(value):
         val = float(value)
         return "%" + "{:,.2f}".format(val).replace(".", ",")
     except: return "-"
-
-def format_tr_nodigit(value):
-    if pd.isna(value) or value == "": return "-"
-    try: return "{:,.0f}".format(float(value)).replace(",", "X").replace(".", ",").replace("X", ".")
-    except: return str(value)
 
 # --- VERİ BAĞLANTISI ---
 def get_client():
@@ -64,10 +59,10 @@ def load_data():
             
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             
-            # SMART FILL (0 KORUMASI)
+            # SMART FILL
             df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
             
-            # Son satır bozuksa at
+            # Son satır kontrolü
             if not df_prices.empty:
                 if df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                     df_prices = df_prices.iloc[:-1]
@@ -97,7 +92,7 @@ def load_data():
         return df_prices, df_trans, watchlist
     except: return pd.DataFrame(), pd.DataFrame(), []
 
-# --- ANALİZ MOTORU (DETAYLI) ---
+# --- ANALİZ MOTORU ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -106,21 +101,16 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def get_pct_change(df, col, minutes):
-    """Dakika bazlı değişim hesaplar"""
     if df.empty: return 0.0
     current_price = df.iloc[-1][col]
     target_time = df.iloc[-1]['Tarih'] - timedelta(minutes=minutes)
-    
-    # Hedef zamana en yakın satır
     closest_row = df.iloc[(df['Tarih'] - target_time).abs().argsort()[:1]]
     if closest_row.empty: return 0.0
-    
     old_price = closest_row.iloc[0][col]
     if old_price == 0: return 0.0
-    
     return (current_price - old_price) / old_price
 
-# --- MAPPING ---
+# --- MAPPING & FİYAT ---
 def create_asset_mapping(watchlist):
     mapping = {
         "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
@@ -142,7 +132,7 @@ def find_smart_price(row, asset_name):
         if search_term in col: return row[col]
     return 0.0
 
-# --- HESAPLAMA (PORTFÖY) ---
+# --- HESAPLAMA ---
 def calculate_portfolio(df_trans, df_prices):
     port = {}
     last_prices = df_prices.iloc[-1] if not df_prices.empty else {}
@@ -325,9 +315,16 @@ def main():
                         df_show = df_view.copy()
                         for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi"]: df_show[c] = df_show[c] / rate
                         df_show["Kâr %"] = df_show.apply(lambda x: x["Net Kâr"]/x["Maliyet"]*100 if x["Maliyet"]>0 else 0, axis=1)
+                        
+                        # --- HASSASİYET AYARI (BURADA DÜZELTİLDİ) ---
                         st.dataframe(df_show.style.format({
-                            "Adet": "{:,.0f}", "Fiyat": "{:,.2f}", "Maliyet": "{:,.2f}",
-                            "Net Değer": "{:,.2f}", "Net Kâr": "{:,.2f}", "Vergi": "{:,.2f}", "Kâr %": "%{:,.2f}"
+                            "Adet": "{:,.0f}", 
+                            "Fiyat": "{:,.6f}",  # 6 basamak hassasiyet
+                            "Maliyet": "{:,.2f}",
+                            "Net Değer": "{:,.2f}", 
+                            "Net Kâr": "{:,.2f}", 
+                            "Vergi": "{:,.2f}", 
+                            "Kâr %": "%{:,.2f}"
                         }), use_container_width=True, hide_index=True)
                         st.divider()
                         
@@ -366,93 +363,60 @@ def main():
                             pct_m = makas/satis*100 if satis>0 else 0
                             gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{pct_m:.2f})", delta_color="inverse")
 
-    # --- SAYFA 2: PİYASA TAKİP (ULTRA DETAY) ---
+    # --- SAYFA 2: PİYASA TAKİP (HATASI GİDERİLDİ) ---
     elif page == "Piyasa Takip":
         st.markdown("## 🌍 Detaylı Piyasa Analizi")
         if not df_prices.empty:
             
             market_data = []
-            
-            # Zaman aralıkları (Dakika cinsinden)
             intervals = {
                 "10 Dk": 10, "30 Dk": 30, "1 Saat": 60, "3 Saat": 180, "6 Saat": 360,
                 "1 Gün": 1440, "3 Gün": 4320, "1 Hafta": 10080, "2 Hafta": 20160,
                 "1 Ay": 43200, "3 Ay": 129600, "6 Ay": 259200, "1 Yıl": 525600
             }
-            
             cols = list(df_prices.columns)
             for col in cols:
                 if col == "Tarih": continue
                 if "FİYAT" in col or "ALTIN" in col or "DOLAR" in col:
-                    # Temel Veriler
                     clean_name = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "")
                     series = df_prices[col]
                     current_price = series.iloc[-1]
-                    
-                    # RSI
                     rsi = 50.0
                     try: rsi = calculate_rsi(series).iloc[-1]
                     except: pass
-                    
-                    # Veri Satırı Oluştur
                     row_data = {
-                        "Enstrüman": clean_name,
-                        "Fiyat": current_price,
-                        "RSI": rsi,
-                        "Trend": series.tail(30).tolist() # Sparkline için
+                        "Enstrüman": clean_name, "Fiyat": current_price, "RSI": rsi,
+                        "Trend": series.tail(30).tolist()
                     }
-                    
-                    # Tüm Zaman Dilimlerini Hesapla
                     for label, mins in intervals.items():
                         row_data[label] = get_pct_change(df_prices, col, mins)
-                        
                     market_data.append(row_data)
             
             df_m = pd.DataFrame(market_data)
-            
-            # --- TABLO AYARLARI ---
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
             
-            # Dinamik Sütun Konfigürasyonu
+            # --- DİNAMİK KOLON AYARI (fixed=True kaldırıldı) ---
             col_config = {
-                "Enstrüman": st.column_config.TextColumn("Varlık", width="small", fixed=True),
-                "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.2f TL", fixed=True),
+                "Enstrüman": st.column_config.TextColumn("Varlık", width="small"),
+                "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.6f TL"),
                 "RSI": st.column_config.NumberColumn("RSI", format="%.0f"),
                 "Trend": st.column_config.LineChartColumn("Trend (30 Veri)", y_min=0, width="small"),
             }
-            
-            # Tüm zaman dilimleri için konfigürasyon ekle
             for label in intervals.keys():
-                col_config[label] = st.column_config.NumberColumn(
-                    label, 
-                    format="%.2f %%",
-                    help=f"{label} önceki fiyata göre değişim"
-                )
+                col_config[label] = st.column_config.NumberColumn(label, format="%.2f %%")
 
             def show_detailed_table(keyword):
-                if keyword == "Hisse": filt = [x for x in market_data if ".IS" in x["Enstrüman"] or "Hisse" in x.get("Türü", "")] # Basit filtre
+                if keyword == "Hisse": filt = [x for x in market_data if ".IS" in x["Enstrüman"] or "Hisse" in x.get("Türü", "")]
                 elif keyword == "Fon": filt = [x for x in market_data if len(x["Enstrüman"]) <= 4 and "." not in x["Enstrüman"]]
                 else: filt = [x for x in market_data if "ALTIN" in x["Enstrüman"] or "DOLAR" in x["Enstrüman"]]
                 
-                # Pandas ile filtreleme daha kolay
-                df_show = df_m[df_m["Enstrüman"].apply(lambda x: ".IS" in x if keyword=="Hisse" else ("ALTIN" in x or "DOLAR" in x) if keyword=="Emtia" else (len(x)<=10 and "." not in x and "ALTIN" not in x))]
-                
-                if df_show.empty:
-                    st.info("Veri yok.")
-                    return
+                # Pandas filtreleme
+                if keyword == "Hisse": df_show = df_m[df_m["Enstrüman"].str.contains(".IS")]
+                elif keyword == "Fon": df_show = df_m[df_m["Enstrüman"].apply(lambda x: len(str(x))<=4 and "." not in str(x))]
+                else: df_show = df_m[df_m["Enstrüman"].str.contains("ALTIN|DOLAR")]
 
-                # RENKLENDİRME (Dataframe içinde gösterim için style yerine column_config kullanıyoruz)
-                # Streamlit şimdilik hücre bazlı arka plan rengini native desteklemiyor (Pandas Styler hariç).
-                # Ancak Pandas Styler interaktifliği kısıtlıyor.
-                # Bu yüzden ok işaretleri ve native formatting kullanıyoruz.
-                
-                st.dataframe(
-                    df_show,
-                    column_config=col_config,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=(len(df_show) * 35) + 38
-                )
+                if df_show.empty: st.info("Veri yok."); return
+                st.dataframe(df_show, column_config=col_config, use_container_width=True, hide_index=True)
 
             with t1: show_detailed_table("Hisse")
             with t2: show_detailed_table("Fon")
