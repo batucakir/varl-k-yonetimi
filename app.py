@@ -353,24 +353,22 @@ def main():
                             grp_col = "Grup" if grp_mode == "Ana Gruplar" else "Varlık"
                             df_pie = df_view.groupby(grp_col)["Net Değer"].sum().reset_index()
                             
-                            # --- RENK PALETİ VE YAZI BOYUTU AYARI ---
-                            custom_colors = {
-                                "ALTIN": "#FFD700",  # Gerçek Altın Sarısı
-                                "NAKİT": "#1f77b4", 
-                                "FON": "#2ca02c",   
-                                "HİSSE": "#d62728",
-                                "DÖVİZ": "#17becf"
-                            }
-                            fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color=grp_col, color_discrete_map=custom_colors)
+                            # --- RENK PALETİ AYARI (V59) ---
+                            if grp_mode == "Ana Gruplar":
+                                # Özel Renkler (Altın Sarısı Dahil)
+                                custom_colors = {"ALTIN": "#FFD700", "NAKİT": "#1f77b4", "FON": "#2ca02c", "HİSSE": "#d62728", "DÖVİZ": "#17becf"}
+                                fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color=grp_col, color_discrete_map=custom_colors)
+                            else:
+                                # Detaylı Görünüm için Uyumlu Profesyonel Palet (Prism)
+                                fig_p = px.pie(df_pie, values="Net Değer", names=grp_col, hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism)
+                                
                             fig_p.update_traces(textinfo="percent+label", textfont_size=18) # BÜYÜK YAZI
-                            
                             st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{curr}")
                         with c2:
                             st.subheader("Kâr/Zarar Durumu")
                             fig_b = go.Figure()
                             fig_b.add_trace(go.Bar(name='Maliyet', x=df_view['Varlık'], y=df_view['Maliyet'], marker_color='lightgrey'))
                             fig_b.add_trace(go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer'], marker_color='forestgreen'))
-                            # --- YAZILARI DÜZELTME ---
                             fig_b.update_layout(xaxis_tickangle=0) # DÜZ YAZI
                             st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{curr}")
                         
