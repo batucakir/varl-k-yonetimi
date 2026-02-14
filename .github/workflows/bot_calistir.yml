@@ -20,9 +20,8 @@ jobs:
 
       - name: Kütüphaneleri Yükle
         run: |
-          pip install gspread oauth2client requests beautifulsoup4
+          pip install gspread oauth2client requests beautifulsoup4 yfinance
 
-      # --- BURASI DEĞİŞTİ (DAHA GÜVENLİ YÖNTEM) ---
       - name: Kimlik Dosyasını Oluştur
         env:
           GCP_CREDS: ${{ secrets.GCP_CREDS }}
