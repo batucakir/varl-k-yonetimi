@@ -5,16 +5,28 @@ import pandas as pd
 import time
 from datetime import datetime, timedelta
 import os
+import json 
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
 
 def connect_to_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    if os.path.exists('credentials.json'):
+    
+    # 1. Önce GitHub Secrets'tan gelip gelmediğine bak
+    creds_json = os.environ.get('GCP_SERVICE_ACCOUNT')
+    
+    if creds_json:
+        # GitHub Actions üzerinde çalışıyorsa burası devreye girer
+        creds_info = json.loads(creds_json)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    elif os.path.exists('credentials.json'):
+        # Kendi bilgisayarında çalıştırıyorsan burası devreye girer
         creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-        return gspread.authorize(creds).open(SHEET_NAME)
-    return None
+    else:
+        return None
+        
+    return gspread.authorize(creds).open(SHEET_NAME)
 
 def main():
     print("🚀 GEÇMİŞ VERİ TAMAMLAYICI BAŞLATILDI...")
