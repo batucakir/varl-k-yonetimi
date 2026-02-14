@@ -63,10 +63,10 @@ def load_data():
                     df_prices[col] = pd.to_numeric(df_prices[col], errors='coerce')
             
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
+            
             # Smart Fill (0'ları önceki değerle doldur)
             df_prices = df_prices.replace(0, np.nan).ffill().fillna(0)
             
-            # Son satır kontrolü (Hala 0 veya hatalıysa at)
             if not df_prices.empty:
                 if df_prices.iloc[-1]["DOLAR KURU"] < 10: 
                     df_prices = df_prices.iloc[:-1]
@@ -95,31 +95,6 @@ def load_data():
 
         return df_prices, df_trans, watchlist
     except: return pd.DataFrame(), pd.DataFrame(), []
-
-# --- ANALİZ MOTORU (YENİ) ---
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def get_change(df, col, hours):
-    """Belirli saat öncesine göre değişimi hesaplar"""
-    if df.empty: return 0.0
-    
-    current_price = df.iloc[-1][col]
-    target_time = df.iloc[-1]['Tarih'] - timedelta(hours=hours)
-    
-    # Hedef zamana en yakın satırı bul
-    closest_row = df.iloc[(df['Tarih'] - target_time).abs().argsort()[:1]]
-    
-    if closest_row.empty: return 0.0
-    
-    old_price = closest_row.iloc[0][col]
-    
-    if old_price == 0: return 0.0
-    return (current_price - old_price) / old_price
 
 # --- MAPPING & FİYAT BULUCU ---
 def create_asset_mapping(watchlist):
@@ -169,20 +144,29 @@ def calculate_portfolio(df_trans, df_prices):
 
     table_rows = []
     total_wealth = 0
+    total_tax = 0 # Vergi Toplamı Eklendi
+
     for v, d in port.items():
         if d["adet"] <= 0.001: continue
         curr_price = find_smart_price(last_prices, v)
         if curr_price == 0: curr_price = find_smart_price(prev_prices, v)
+        
         guncel_deger = d["adet"] * curr_price
-        vergi = (guncel_deger - d["maliyet"]) * FON_VERGI_ORANI if "FON" in str(d["tur"]).upper() and guncel_deger > d["maliyet"] else 0
+        vergi = 0
+        if "FON" in str(d["tur"]).upper() and guncel_deger > d["maliyet"]:
+            vergi = (guncel_deger - d["maliyet"]) * FON_VERGI_ORANI
+            
         net_deger = guncel_deger - vergi
         kar = net_deger - d["maliyet"]
+        
         table_rows.append({
             "Grup": d["tur"], "Varlık": v, "Adet": d["adet"], "Fiyat": curr_price,
-            "Maliyet": d["maliyet"], "Net Değer": net_deger, "Net Kâr": kar
+            "Maliyet": d["maliyet"], "Net Değer": net_deger, "Net Kâr": kar, "Vergi": vergi
         })
         total_wealth += net_deger
-    return pd.DataFrame(table_rows), total_wealth
+        total_tax += vergi
+
+    return pd.DataFrame(table_rows), total_wealth, total_tax
 
 def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
     if df_prices.empty: return pd.DataFrame()
@@ -212,9 +196,9 @@ def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
         for v, qty in running_port.items():
             if qty <= 0: continue
             pk = asset_map.get(v)
+            p = 0
             if pk == "NAKİT": p = 1.0
             elif pk:
-                p = 0
                 for col in price_row.index:
                     if pk in col: p = price_row[col]; break
             tot += (qty * p)
@@ -281,7 +265,9 @@ def main():
     if page == "Portföyüm":
         st.markdown("<h2 style='text-align: center;'>💎 Varlık Portföyü</h2>", unsafe_allow_html=True)
         if not df_trans.empty and not df_prices.empty:
-            df_view, tot_wealth = calculate_portfolio(df_trans, df_prices)
+            # Hesaplamada tot_tax artık geliyor
+            df_view, tot_wealth, tot_tax = calculate_portfolio(df_trans, df_prices)
+            
             tab1, tab2 = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm"])
             for t, curr, rate in [(tab1, "TL", 1.0), (tab2, "$", usd)]:
                 with t:
@@ -289,6 +275,7 @@ def main():
                         net_profit = df_view["Net Kâr"].sum()
                         cost = df_view["Maliyet"].sum()
                         ratio = (net_profit / cost * 100) if cost > 0 else 0
+                        
                         df_trend = prepare_historical_trend(df_prices, df_trans, ASSET_MAPPING, rate)
                         diff_pct = 0
                         if len(df_trend) > 1:
@@ -297,7 +284,13 @@ def main():
                             diff_pct = (curr_val - prev_val) / prev_val * 100
                         
                         c1, c2, c3 = st.columns(3)
-                        c1.metric("Toplam Varlık", f"{format_tr_money(tot_wealth/rate)} {curr}")
+                        # Vergi Bilgisi Geri Geldi!
+                        c1.metric(
+                            "Toplam Varlık (Net)", 
+                            f"{format_tr_money(tot_wealth/rate)} {curr}", 
+                            f"Vergi: -{format_tr_money(tot_tax/rate)} {curr}", 
+                            delta_color="inverse"
+                        )
                         c2.metric("Net Kâr", f"{format_tr_money(net_profit/rate)} {curr}", f"{format_tr_percent(diff_pct)} (Son Değişim)")
                         c3.metric("Kâr Oranı", f"%{format_tr_money(ratio)}")
                         st.divider()
@@ -313,11 +306,11 @@ def main():
                             
                         st.subheader("📋 Varlık Detayı")
                         df_show = df_view.copy()
-                        for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr"]: df_show[c] = df_show[c] / rate
+                        for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi"]: df_show[c] = df_show[c] / rate
                         df_show["Kâr %"] = df_show.apply(lambda x: x["Net Kâr"]/x["Maliyet"]*100 if x["Maliyet"]>0 else 0, axis=1)
                         st.dataframe(df_show.style.format({
                             "Adet": "{:,.0f}", "Fiyat": "{:,.2f}", "Maliyet": "{:,.2f}",
-                            "Net Değer": "{:,.2f}", "Net Kâr": "{:,.2f}", "Kâr %": "%{:,.2f}"
+                            "Net Değer": "{:,.2f}", "Net Kâr": "{:,.2f}", "Vergi": "{:,.2f}", "Kâr %": "%{:,.2f}"
                         }), use_container_width=True, hide_index=True)
                         st.divider()
                         
@@ -340,7 +333,7 @@ def main():
                             fig_p.update_traces(textinfo="percent+label")
                             st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{curr}")
                         with c2:
-                            st.subheader("Maliyet vs Değer")
+                            st.subheader("Kâr/Zarar Durumu")
                             fig_b = go.Figure()
                             fig_b.add_trace(go.Bar(name='Maliyet', x=df_view['Varlık'], y=df_view['Maliyet'], marker_color='lightgrey'))
                             fig_b.add_trace(go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer'], marker_color='forestgreen'))
@@ -356,94 +349,52 @@ def main():
                             pct_m = makas/satis*100 if satis>0 else 0
                             gold_cols[i].metric(name, format_tr_money(satis), f"Makas: {format_tr_money(makas)} (%{pct_m:.2f})", delta_color="inverse")
 
-    # --- SAYFA 2: PİYASA TAKİP (PRO ANALİZ) ---
+    # --- SAYFA 2: PİYASA TAKİP ---
     elif page == "Piyasa Takip":
         st.markdown("## 🌍 Piyasa İzleme")
         if not df_prices.empty:
+            last = df_prices.iloc[-1]
+            prev = df_prices.iloc[-2] if len(df_prices)>1 else last
             
-            # --- VERİ HAZIRLAMA (GELİŞMİŞ) ---
-            market_data = []
-            
-            # Son 30 veriyi al (Sparkline ve RSI için)
-            lookback = 100 
-            df_slice = df_prices.tail(lookback)
+            hisseler, fonlar, emtia = [], [], []
             
             for col in df_prices.columns:
                 if col == "Tarih": continue
                 if "FİYAT" in col or "ALTIN" in col or "DOLAR" in col:
-                    # Temiz İsim
                     name = col.replace(" FİYAT", "").replace(" ALIŞ", "").replace(" SATIŞ", "")
+                    price = last[col]
+                    old = prev[col]
                     
-                    # Fiyat Serisi
-                    series = df_slice[col]
+                    diff = 0
+                    if old > 0 and price > 0: diff = (price - old) / old
                     
-                    # 1. Anlık Fiyat
-                    price = series.iloc[-1]
+                    item = {"Enstrüman": name, "Fiyat": price, "Değişim": diff}
                     
-                    # 2. Değişimler
-                    chg_1h = get_change(df_slice, col, 1)
-                    chg_24h = get_change(df_slice, col, 24)
-                    chg_7d = get_change(df_slice, col, 24*7)
-                    
-                    # 3. Zirve/Dip (24s)
-                    last_24h_data = df_slice[df_slice['Tarih'] > (datetime.now() - timedelta(hours=24))][col]
-                    high_24h = last_24h_data.max() if not last_24h_data.empty else price
-                    low_24h = last_24h_data.min() if not last_24h_data.empty else price
-                    
-                    # 4. RSI (Basit)
-                    rsi = 50.0
-                    try: rsi = calculate_rsi(series).iloc[-1]
-                    except: pass
-                    
-                    # 5. Trend Verisi (Sparkline için son 20 veri)
-                    trend_list = series.tail(20).tolist()
-                    
-                    market_data.append({
-                        "Enstrüman": name,
-                        "Fiyat": price,
-                        "1S %": chg_1h,
-                        "24S %": chg_24h,
-                        "7G %": chg_7d,
-                        "24s Yüksek": high_24h,
-                        "24s Düşük": low_24h,
-                        "RSI": rsi,
-                        "Trend": trend_list,
-                        "Türü": "Hisse" if ".IS" in col else "Emtia" if "ALTIN" in col or "DOLAR" in col else "Fon"
-                    })
+                    if ".IS" in col: hisseler.append(item)
+                    elif "ALTIN" in col or "DOLAR" in col: emtia.append(item)
+                    elif len(col) <= 12: fonlar.append(item)
             
-            df_market = pd.DataFrame(market_data)
-            
-            # --- TABLO GÖSTERİMİ ---
             t1, t2, t3 = st.tabs(["📈 Hisseler", "📊 Fonlar", "🥇 Altın/Döviz"])
             
-            def render_pro_table(filter_type):
-                df_filt = df_market[df_market["Türü"] == filter_type]
-                if df_filt.empty:
+            def show_table(data):
+                if not data: 
                     st.info("Veri yok.")
                     return
-                
+                df = pd.DataFrame(data)
                 st.dataframe(
-                    df_filt,
+                    df,
                     column_config={
                         "Enstrüman": st.column_config.TextColumn("Varlık", width="medium"),
                         "Fiyat": st.column_config.NumberColumn("Fiyat", format="%.2f TL"),
-                        "1S %": st.column_config.NumberColumn("1 Saat", format="%.2f %%"),
-                        "24S %": st.column_config.NumberColumn("24 Saat", format="%.2f %%"),
-                        "7G %": st.column_config.NumberColumn("1 Hafta", format="%.2f %%"),
-                        "24s Yüksek": st.column_config.NumberColumn("24S Zirve", format="%.2f TL"),
-                        "24s Düşük": st.column_config.NumberColumn("24S Dip", format="%.2f TL"),
-                        "RSI": st.column_config.NumberColumn("RSI (Güç)", format="%.0f"),
-                        "Trend": st.column_config.LineChartColumn("Trend (Son Hareket)", y_min=0, width="medium"),
-                        "Türü": None # Gizle
+                        "Değişim": st.column_config.NumberColumn("Günlük %", format="%.2f %%")
                     },
                     use_container_width=True,
-                    hide_index=True,
-                    height=(len(df_filt) * 35) + 38
+                    hide_index=True
                 )
 
-            with t1: render_pro_table("Hisse")
-            with t2: render_pro_table("Fon")
-            with t3: render_pro_table("Emtia")
+            with t1: show_table(hisseler)
+            with t2: show_table(fonlar)
+            with t3: show_table(emtia)
 
 if __name__ == "__main__":
     main()
