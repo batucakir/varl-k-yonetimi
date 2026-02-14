@@ -24,4 +24,6 @@ jobs:
           echo "${{ secrets.GCP_SERVICE_ACCOUNT }}" > credentials.json
 
       - name: Gecmis Veriyi Doldur
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: python history_filler.py
