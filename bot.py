@@ -128,7 +128,7 @@ def fetch_fund_single(code):
     url = f"https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod={code}"
     headers = {"User-Agent": random.choice(USER_AGENTS), "Referer": "https://www.tefas.gov.tr/"}
     try:
-        time.sleep(0.2) 
+        time.sleep(0.1) 
         resp = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
         top_list = soup.find("ul", class_="top-list")
@@ -144,15 +144,18 @@ def fetch_fund_single(code):
 def fetch_stock_price(ticker):
     try:
         stock = yf.Ticker(ticker)
-        # Hafta sonu olduğu için son kapanış fiyatını (history) alacağız
+        # Hafta sonu olduğu için fast_info bazen boş dönebilir, history daha güvenli
         hist = stock.history(period="1d")
         if not hist.empty:
             return float(hist['Close'].iloc[-1])
-        return 0.0
+        
+        # Yedek yöntem
+        price = stock.fast_info['last_price']
+        return float(price) if price else 0.0
     except: return 0.0
 
 def update_all_assets(current_cache):
-    print("\n🌍 VARLIK GÜNCELLEMESİ BAŞLADI (Development Mode)...")
+    print("\n🌍 VARLIK GÜNCELLEMESİ BAŞLADI...")
     new_cache = current_cache.copy()
     
     # 1. Fonlar
@@ -166,36 +169,39 @@ def update_all_assets(current_cache):
     print(f"   📈 {len(ALL_STOCKS)} Hisse taranıyor...")
     for ticker in ALL_STOCKS:
         key = f"{ticker} FİYAT"
+        # Log kirliliği yapmasın diye print'i kaldırdım, arka planda çalışsın
         price = fetch_stock_price(ticker)
-        if price > 0:
-            new_cache[key] = price
-            # print(f"✅ {ticker}: {price}") # Log kirliliği olmasın diye kapattım
-        else:
-            new_cache[key] = new_cache.get(key, 0)
+        if price > 0: new_cache[key] = price
+        else: new_cache[key] = new_cache.get(key, 0)
     
     print("🌍 Tamamlandı.\n")
     return new_cache
 
 def main():
-    # --- UYKU MODU İPTAL EDİLDİ ---
-    # Geliştirme aşamasında her tetiklendiğinde çalışsın.
+    # Uyku modunu kapattık, her türlü çalışacak.
     tr_now = datetime.utcnow() + timedelta(hours=3)
-    print(f"🤖 BOT ÇALIŞIYOR... (Saat: {tr_now.strftime('%H:%M')})")
+    print(f"🤖 BOT ÇALIŞIYOR (Tamir Modu)... (Saat: {tr_now.strftime('%H:%M')})")
     
     sheet = connect_to_sheet()
     if not sheet: return
 
-    # --- SÜTUN KONTROLÜ (KRİTİK) ---
-    # Eğer Excel'deki başlıklar eksikse, başlıkları yenile.
-    try:
-        current_headers = sheet.row_values(1)
-        if len(current_headers) < len(SUTUN_SIRASI):
-            print("📝 YENİ HİSSELER TESPİT EDİLDİ! Tablo başlıkları güncelleniyor...")
-            sheet.delete_row(1)
-            sheet.insert_row(SUTUN_SIRASI, 1)
-            print("✅ Başlıklar güncellendi.")
-    except: pass
+    # --- BAŞLIK ONARIM KISMI (TRY-EXCEPT YOK, HATA VARSA GÖRELİM) ---
+    print("🛠️ Başlık satırı kontrol ediliyor...")
+    current_headers = sheet.row_values(1)
+    
+    # Eğer başlıklar eksikse veya uyuşmuyorsa
+    if current_headers != SUTUN_SIRASI:
+        print(f"⚠️ Uyuşmazlık var! Mevcut: {len(current_headers)}, Olması Gereken: {len(SUTUN_SIRASI)}")
+        print("♻️ 1. Satır siliniyor ve yeniden yazılıyor...")
+        sheet.delete_row(1)
+        # Biraz bekle Google kendine gelsin
+        time.sleep(2) 
+        sheet.insert_row(SUTUN_SIRASI, 1)
+        print("✅ Başlıklar başarıyla onarıldı.")
+    else:
+        print("✅ Başlıklar zaten güncel.")
 
+    # Normal akışa devam
     cached_data = get_last_known_from_sheet(sheet)
     cached_data = update_all_assets(cached_data) 
     gold = fetch_gold()
