@@ -593,9 +593,110 @@ def main():
                     df_plot = df_plot.rename(columns={col: "Fiyat"}).dropna()
                     fig = px.line(df_plot, x="Tarih", y="Fiyat")
                     fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True)                    
                 else:
                     st.error("Bu sembolün fiyat kolonu bulunamadı.")
+                    # ================================
+                    # 🧭 Zamansal Değişim Tablosu
+                    # ================================
+                    st.divider()
+                    st.subheader("🧭 Zamansal Değişim")
+                    
+                    def price_on_or_before(df, price_col, target_dt):
+                        sub = df[df["Tarih"] <= target_dt]
+                        if sub.empty:
+                            return None
+                        return float(sub.iloc[-1][price_col] or 0)
+                    
+                    now_dt = df_prices["Tarih"].iloc[-1]
+                    p_now = float(last.get(col, 0) or 0)
+                    
+                    # Fon mu?
+                    fund_mode = False
+                    if selected.upper() in [x.upper() for x in MY_FUNDS]:
+                        fund_mode = True
+                    if "." not in selected and 2 <= len(selected) <= 5:
+                        fund_mode = True
+                    
+                    presets_fund = [
+                        ("1D",  pd.Timedelta(days=1)),
+                        ("2D",  pd.Timedelta(days=2)),
+                        ("3D",  pd.Timedelta(days=3)),
+                        ("1W",  pd.Timedelta(days=7)),
+                        ("10D", pd.Timedelta(days=10)),
+                        ("15D", pd.Timedelta(days=15)),
+                        ("30D", pd.Timedelta(days=30)),
+                        ("3M",  pd.Timedelta(days=90)),
+                        ("6M",  pd.Timedelta(days=180)),
+                        ("12M", pd.Timedelta(days=365)),
+                    ]
+                    
+                    presets_other = [
+                        ("1m",  pd.Timedelta(minutes=1)),
+                        ("5m",  pd.Timedelta(minutes=5)),
+                        ("10m", pd.Timedelta(minutes=10)),
+                        ("30m", pd.Timedelta(minutes=30)),
+                        ("1h",  pd.Timedelta(hours=1)),
+                        ("3h",  pd.Timedelta(hours=3)),
+                        ("4h",  pd.Timedelta(hours=4)),
+                        ("6h",  pd.Timedelta(hours=6)),
+                        ("1D",  pd.Timedelta(days=1)),
+                        ("2D",  pd.Timedelta(days=2)),
+                        ("3D",  pd.Timedelta(days=3)),
+                        ("1W",  pd.Timedelta(days=7)),
+                        ("10D", pd.Timedelta(days=10)),
+                        ("15D", pd.Timedelta(days=15)),
+                        ("30D", pd.Timedelta(days=30)),
+                        ("3M",  pd.Timedelta(days=90)),
+                        ("6M",  pd.Timedelta(days=180)),
+                        ("12M", pd.Timedelta(days=365)),
+                    ]
+                    
+                    presets = presets_fund if fund_mode else presets_other
+                    
+                    out = []
+                    
+                    # YTD
+                    start_of_year = pd.Timestamp(year=now_dt.year, month=1, day=1)
+                    p_ytd = price_on_or_before(df_prices, col, start_of_year)
+                    
+                    if p_ytd and p_ytd > 0:
+                        out.append({
+                            "Periyot": "YTD",
+                            "Başlangıç": p_ytd,
+                            "Şimdi": p_now,
+                            "Değişim": p_now - p_ytd,
+                            "Değişim %": ((p_now - p_ytd) / p_ytd) * 100
+                        })
+                    
+                    # Presetler
+                    for label, delta in presets:
+                        t0 = now_dt - delta
+                        p0 = price_on_or_before(df_prices, col, t0)
+                        if p0 and p0 > 0:
+                            out.append({
+                                "Periyot": label,
+                                "Başlangıç": p0,
+                                "Şimdi": p_now,
+                                "Değişim": p_now - p0,
+                                "Değişim %": ((p_now - p0) / p0) * 100
+                            })
+                    
+                    df_perf = pd.DataFrame(out)
+                    
+                    st.caption(f"Mod: {'FON (1D+)' if fund_mode else 'DİĞER (1m+)'}")
+                    
+                    st.dataframe(
+                        df_perf.style.format({
+                            "Başlangıç": "{:,.4f}",
+                            "Şimdi": "{:,.4f}",
+                            "Değişim": "{:,.4f}",
+                            "Değişim %": "%{:.2f}"
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
 
 if __name__ == "__main__":
     main()
