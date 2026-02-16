@@ -522,28 +522,6 @@ def main():
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
 
-                st.divider()
-                st.subheader("🧾 Aylık Realized Özeti")
-                
-                df_month = realized_monthly_summary(df_trans)
-                
-                if df_month.empty:
-                    st.info("Henüz satış işlemi yok.")
-                else:
-                    # TL sekmesinde TL, USD sekmesinde USD göstermek için rate kullan
-                    df_show = df_month.copy()
-                    df_show["Realized"] = df_show["Realized"] / rate
-                
-                    st.dataframe(
-                        df_show.style.format({
-                            "Realized": "{:,.2f}",
-                            "Win Rate %": "%{:.1f}"
-                        }),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
                 c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
                 c3.metric("Kâr Oranı", f"%{((df_view['Net Kâr'].sum() / df_view['Maliyet'].sum()) * 100) if (not df_view.empty and df_view['Maliyet'].sum() > 0) else 0:,.2f}")
@@ -657,6 +635,27 @@ def main():
                     st.divider()
                     if not df_view.empty:
                         render_rebalance_assistant(df_view)
+                                st.divider()
+                        
+                st.subheader("🧾 Aylık Realized Özeti")
+                
+                df_month = realized_monthly_summary(df_trans)
+                
+                if df_month.empty:
+                    st.info("Henüz satış işlemi yok.")
+                else:
+                    # TL sekmesinde TL, USD sekmesinde USD göstermek için rate kullan
+                    df_show = df_month.copy()
+                    df_show["Realized"] = df_show["Realized"] / rate
+                
+                    st.dataframe(
+                        df_show.style.format({
+                            "Realized": "{:,.2f}",
+                            "Win Rate %": "%{:.1f}"
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )        
 
     elif page == "Piyasa Takip":
         st.markdown("## 🌍 Detaylı Piyasa Analizi")
