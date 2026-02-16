@@ -193,36 +193,58 @@ def calculate_portfolio(df_trans, df_prices):
         tot_t += vergi
     return pd.DataFrame(table_rows), tot_w, tot_t
 
-def prepare_historical_trend(df_prices, df_trans, asset_map, rate=1.0):
-    if df_prices.empty or df_trans.empty: return pd.DataFrame()
-    trend_data, running_port, trans_idx = [], {}, 0
-    df_prices, df_trans = df_prices.sort_values("Tarih"), df_trans.sort_values("Tarih")
-    
-    first_trans_date = df_trans['Tarih'].min()
-    current_assets, _, _ = calculate_portfolio(df_trans, df_prices)
-    
+def prepare_historical_trend(df_prices, df_trans, rate=1.0):
+    """
+    Her tarih için: o tarihe kadar gerçekleşen işlemlerle oluşan adetleri kullanarak
+    portföy değerini hesaplar. Bugünkü adedi fallback olarak kullanmaz (doğruluk fix).
+    """
+    if df_prices.empty or df_trans.empty:
+        return pd.DataFrame()
+
+    df_prices = df_prices.sort_values("Tarih").copy()
+    df_trans = df_trans.sort_values("Tarih").copy()
+
+    # Sadece geçerli tarihler
+    df_trans = df_trans.dropna(subset=["Tarih"])
+    first_date = df_trans["Tarih"].min()
+
+    running_qty = {}  # varlık -> adet
+    trend_data = []
+    trans_idx = 0
+    trans_rows = df_trans.reset_index(drop=True)
+
     for _, pr in df_prices.iterrows():
-        cd = pr['Tarih']
-        if cd < first_trans_date: continue
-        
-        while trans_idx < len(df_trans):
-            td = df_trans.iloc[trans_idx]['Tarih']
-            if td <= cd:
-                tr = df_trans.iloc[trans_idx]
-                v, isl, ad = str(tr['Varlık']).strip(), str(tr['İşlem']).upper().strip(), float(tr['Adet'])
-                running_port[v] = running_port.get(v, 0.0) + (ad if isl == "ALIS" else -ad)
-                trans_idx += 1
-            else: break
-            
-        tot = 0
-        for _, asset in current_assets.iterrows():
-            v = asset['Varlık']
-            # Nakit Koruyucu (1.8M Fix): İşlem yoksa bugünkü adetleri fallback al
-            qty = running_port.get(v, asset['Adet']) 
-            if qty <= 0.001: continue
-            tot += (qty * find_smart_price(pr, v))
-        if tot > 0: trend_data.append({"Tarih": cd, "Toplam Servet": tot/rate})
+        cd = pr["Tarih"]
+        if pd.isna(cd) or cd < first_date:
+            continue
+
+        # O tarihe kadar işlemleri uygula
+        while trans_idx < len(trans_rows) and trans_rows.loc[trans_idx, "Tarih"] <= cd:
+            tr = trans_rows.loc[trans_idx]
+            v = str(tr["Varlık"]).strip()
+            islem = str(tr["İşlem"]).upper().strip()
+            ad = float(tr["Adet"]) if not pd.isna(tr["Adet"]) else 0.0
+
+            if islem == "ALIS":
+                running_qty[v] = running_qty.get(v, 0.0) + ad
+            elif islem == "SATIS":
+                running_qty[v] = running_qty.get(v, 0.0) - ad
+            trans_idx += 1
+
+        # O günkü toplam değer
+        tot = 0.0
+        for v, qty in running_qty.items():
+            if qty <= 0:
+                continue
+            price = find_smart_price(pr, v)
+            if price and price > 0:
+                tot += qty * price
+
+        if tot > 0:
+            trend_data.append({"Tarih": cd, "Toplam Servet": tot / rate})
+
     return pd.DataFrame(trend_data)
+
 
 # --- KIYASLAMA GRAFİĞİ ---
 def render_benchmark_chart(df_trend, df_prices):
