@@ -350,6 +350,45 @@ def calculate_external_cashflows(df_trans):
                 month_net += net
 
     return total_in, total_out, month_net, today_net
+    
+def external_cashflow_table(df_trans, limit=50):
+    """
+    Sadece dış nakit akışı satırlarını döndürür:
+    - Varlık = TL Bakiye
+    - Kaynak = DIS_GIRIS / DIS_CIKIS
+    - DIS_GIRIS: ALIS (+)
+    - DIS_CIKIS: SATIS (-)
+    """
+    if df_trans is None or df_trans.empty:
+        return pd.DataFrame(columns=["Tarih", "Kaynak", "İşlem", "Adet", "Net"])
+
+    df = df_trans.dropna(subset=["Tarih"]).copy()
+    if "Kaynak" not in df.columns:
+        df["Kaynak"] = ""
+
+    df["Varlık_u"] = df["Varlık"].astype(str).str.upper().str.strip()
+    df["Kaynak_u"] = df["Kaynak"].astype(str).str.upper().str.strip()
+    df["Islem_u"] = df["İşlem"].astype(str).str.upper().str.strip()
+
+    df = df[df["Varlık_u"] == "TL BAKIYE"]
+    df = df[df["Kaynak_u"].isin(["DIS_GIRIS", "DIS_CIKIS"])]
+
+    if df.empty:
+        return pd.DataFrame(columns=["Tarih", "Kaynak", "İşlem", "Adet", "Net"])
+
+    # Net kolonunu hesapla
+    def _net(row):
+        if row["Kaynak_u"] == "DIS_GIRIS" and row["Islem_u"] == "ALIS":
+            return float(row.get("Adet", 0) or 0)
+        if row["Kaynak_u"] == "DIS_CIKIS" and row["Islem_u"] == "SATIS":
+            return -float(row.get("Adet", 0) or 0)
+        return 0.0
+
+    df["Net"] = df.apply(_net, axis=1)
+
+    out = df.sort_values("Tarih", ascending=False)[["Tarih", "Kaynak_u", "Islem_u", "Adet", "Net"]].copy()
+    out = out.rename(columns={"Kaynak_u": "Kaynak", "Islem_u": "İşlem"})
+    return out.head(limit)
 
 # --- AYLIK REALIZED ÖZET ---
 def realized_monthly_summary(df_trans):
