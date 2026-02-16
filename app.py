@@ -256,21 +256,6 @@ def calculate_realized_pnl(df_trans):
                 positions[v]["maliyet"] -= avg_cost * adet
 
     return total_realized, month_realized, today_realized
-# --- CASHFLOW (Dış Para Girişi/Çıkışı) ---
-def calculate_external_cashflows(df_trans):
-    if df_trans.empty:
-        return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
-
-    df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
-
-    today = datetime.now().date()
-    this_month = datetime.now().month
-    this_year = datetime.now().year
-
-    total_in = 0.0
-    total_out = 0.0
-    month_net = 0.0
-    today_net = 0.0
 
     for _, r in df.iterrows():
         tur = str(r.get("Tür", "")).upper().strip()
