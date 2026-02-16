@@ -197,6 +197,57 @@ def calculate_portfolio(df_trans, df_prices):
 
     return pd.DataFrame(rows), tot_w, tot_t
 
+# --- REALIZED P&L HESAPLAMA ---
+def calculate_realized_pnl(df_trans):
+    if df_trans.empty:
+        return 0.0, 0.0, 0.0
+
+    df_trans = df_trans.sort_values("Tarih").copy()
+
+    positions = {}
+    total_realized = 0.0
+    today_realized = 0.0
+    month_realized = 0.0
+
+    today = datetime.now().date()
+    this_month = datetime.now().month
+    this_year = datetime.now().year
+
+    for _, row in df_trans.iterrows():
+        v = str(row.get("Varlık", "")).strip()
+        islem = str(row.get("İşlem", "")).upper().strip()
+        adet = float(row.get("Adet", 0) or 0)
+        fiyat = float(row.get("Fiyat", 0) or 0)
+        tarih = row.get("Tarih")
+
+        if v == "":
+            continue
+
+        if v not in positions:
+            positions[v] = {"adet": 0.0, "maliyet": 0.0}
+
+        if islem == "ALIS":
+            positions[v]["adet"] += adet
+            positions[v]["maliyet"] += adet * fiyat
+
+        elif islem == "SATIS":
+            if positions[v]["adet"] > 0:
+                avg_cost = positions[v]["maliyet"] / positions[v]["adet"]
+                realized = (fiyat - avg_cost) * adet
+
+                total_realized += realized
+
+                if pd.notna(tarih):
+                    if tarih.date() == today:
+                        today_realized += realized
+                    if tarih.month == this_month and tarih.year == this_year:
+                        month_realized += realized
+
+                positions[v]["adet"] -= adet
+                positions[v]["maliyet"] -= avg_cost * adet
+
+    return total_realized, month_realized, today_realized
+
 # --- SERVET TRENDİ (DOĞRU HESAP: SADECE O TARİHE KADAR İŞLEMLER) ---
 def prepare_historical_trend(df_prices, df_trans, rate=1.0):
     if df_prices.empty or df_trans.empty:
