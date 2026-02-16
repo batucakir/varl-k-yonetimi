@@ -567,127 +567,112 @@ def main():
                         render_rebalance_assistant(df_view)
 
     # -------------------- PİYASA TAKİP --------------------
-    elif page == "Piyasa Takip":
-    st.markdown("## 🌍 Detaylı Piyasa Analizi")
+        elif page == "Piyasa Takip":
+        st.markdown("## 🌍 Detaylı Piyasa Analizi")
+    
+        if df_prices.empty:
+            st.warning("Fiyat verisi yok.")
+            st.stop()
+    
+        df_prices = df_prices.sort_values("Tarih")
+        last = df_prices.iloc[-1]
+        prev = df_prices.iloc[-2] if len(df_prices) >= 2 else last
+    
+        # ---------- Yardımcılar ----------
+        def pct_change(a, b):
+            try:
+                a = float(a or 0)
+                b = float(b or 0)
+                return ((a - b) / b) * 100 if b > 0 else 0.0
+            except:
+                return 0.0
+    
+            def is_fund_col(col: str) -> bool:
+            u = str(col).upper()
+            if not (u.endswith(" FİYAT") or u.endswith(" FIYAT")):
+                return False
+            if ".IS" in u:
+                return False
+            base = u.replace(" FİYAT", "").replace(" FIYAT", "").strip()
+            return len(base) in (3, 4)
 
-    if df_prices.empty:
-        st.warning("Fiyat verisi yok.")
-        st.stop()
-
-    df_prices = df_prices.sort_values("Tarih")
-    last = df_prices.iloc[-1]
-    prev = df_prices.iloc[-2] if len(df_prices) >= 2 else last
-
-    # ---------- Yardımcılar ----------
-    def pct_change(a, b):
-        try:
-            a = float(a or 0)
-            b = float(b or 0)
-            return ((a - b) / b) * 100 if b > 0 else 0.0
-        except:
-            return 0.0
-
-    def is_fund_col(col: str) -> bool:
-        u = str(col).upper()
-        if not (u.endswith(" FİYAT") or u.endswith(" FIYAT")):
-            return False
-        if ".IS" in u:
-            return False
-        base = u.replace(" FİYAT", "").replace(" FIYAT", "").strip()
-        return len(base) in (3, 4)
-
-    def is_stock_col(col: str) -> bool:
-        u = str(col).upper()
-        return ".IS" in u and ("FİYAT" in u or "FIYAT" in u)
-
-    def classify_col(c: str) -> str:
-        u = str(c).upper()
-        if u in ["DOLAR KURU", "EURO KURU"]:
-            return "Döviz"
-        if "ALTIN" in u or "ONS" in u or "AYAR" in u or "ÇEYREK" in u or "CEYREK" in u or "ATA" in u or "GRAM" in u:
-            return "Altın"
-        if is_fund_col(c):
-            return "Fonlar"
-        if is_stock_col(c):
-            return "Hisseler"
-        if (u.endswith(" FİYAT") or u.endswith(" FIYAT")):
+        def is_stock_col(col: str) -> bool:
+            u = str(col).upper()
+            return ".IS" in u and ("FİYAT" in u or "FIYAT" in u)
+    
+        def classify_col(c: str) -> str:
+            u = str(c).upper()
+            if u in ["DOLAR KURU", "EURO KURU"]:
+                return "Döviz"
+            if "ALTIN" in u or "ONS" in u or "AYAR" in u or "ÇEYREK" in u or "CEYREK" in u or "ATA" in u or "GRAM" in u:
+                return "Altın"
+            if is_fund_col(c):
+                return "Fonlar"
+            if is_stock_col(c):
+                return "Hisseler"
+            if (u.endswith(" FİYAT") or u.endswith(" FIYAT")):
+                return "Diğer"
             return "Diğer"
-        return "Diğer"
+    
+        def get_symbol_from_col(col: str) -> str:
+            # "AKBNK.IS FİYAT" -> "AKBNK.IS", "TLY FİYAT" -> "TLY"
+            return str(col).replace(" FİYAT", "").replace(" FIYAT", "").strip()
 
-    def get_symbol_from_col(col: str) -> str:
-        # "AKBNK.IS FİYAT" -> "AKBNK.IS", "TLY FİYAT" -> "TLY"
-        return str(col).replace(" FİYAT", "").replace(" FIYAT", "").strip()
+        # ---------- Son değer tablosu ----------
+        rows = []
+        for c in df_prices.columns:
+            if c == "Tarih":
+                continue
+            v_last = float(last.get(c, 0) or 0)
+            v_prev = float(prev.get(c, 0) or 0)
+            rows.append({
+                "Kategori": classify_col(c),
+                "Kalem": c,
+                "Son": v_last,
+                "Önceki": v_prev,
+                "Günlük %": pct_change(v_last, v_prev),
+            })
+        df_all = pd.DataFrame(rows)
 
-    # ---------- Son değer tablosu ----------
-    rows = []
-    for c in df_prices.columns:
-        if c == "Tarih":
-            continue
-        v_last = float(last.get(c, 0) or 0)
-        v_prev = float(prev.get(c, 0) or 0)
-        rows.append({
-            "Kategori": classify_col(c),
-            "Kalem": c,
-            "Son": v_last,
-            "Önceki": v_prev,
-            "Günlük %": pct_change(v_last, v_prev),
-        })
-    df_all = pd.DataFrame(rows)
+        # ---------- Üst metrikler ----------
+        m = st.columns(6)
+        def safe_metric(col_name, label, fmt="{:,.2f}"):
+            if col_name in df_prices.columns:
+                v = float(last.get(col_name, 0) or 0)
+                p = float(prev.get(col_name, 0) or 0)
+                mval = fmt.format(v)
+                mch = f"%{pct_change(v, p):.2f}"
+                return label, mval, mch
+            return label, "-", ""
 
-    # ---------- Üst metrikler ----------
-    m = st.columns(6)
-    def safe_metric(col_name, label, fmt="{:,.2f}"):
-        if col_name in df_prices.columns:
-            v = float(last.get(col_name, 0) or 0)
-            p = float(prev.get(col_name, 0) or 0)
-            mval = fmt.format(v)
-            mch = f"%{pct_change(v, p):.2f}"
-            return label, mval, mch
-        return label, "-", ""
-
-    metrics = [
-        safe_metric("DOLAR KURU", "USD/TRY"),
-        safe_metric("EURO KURU", "EUR/TRY"),
-        safe_metric("GRAM ALTIN SATIŞ", "Gram Altın Satış"),
-        safe_metric("ALTIN ONS SATIŞ", "Ons Satış"),
-        safe_metric("TLY FİYAT", "TLY", "{:,.4f}"),
-        safe_metric("DFI FİYAT", "DFI", "{:,.4f}"),
-    ]
-    for i, (lab, val, chg) in enumerate(metrics):
-        m[i].metric(lab, val, chg)
-
-    st.divider()
-
-    # ---------- Sol: tüm kalemler ----------
-    c1, c2 = st.columns([1.25, 1])
-
-    with c1:
-        st.subheader("📌 Tüm Kalemler (Son değerler)")
-        cats = ["Hepsi"] + sorted(df_all["Kategori"].unique().tolist())
-        cat_sel = st.selectbox("Kategori filtrele", cats, key="mkt_cat")
-
-        show_df = df_all.copy()
-        if cat_sel != "Hepsi":
-            show_df = show_df[show_df["Kategori"] == cat_sel]
-
-        show_df = show_df.sort_values(["Kategori", "Kalem"])
-        st.dataframe(
-            show_df[["Kategori", "Kalem", "Son", "Günlük %"]].style.format({
-                "Son": "{:,.4f}",
-                "Günlük %": "%{:.2f}"
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
+        metrics = [
+            safe_metric("DOLAR KURU", "USD/TRY"),
+            safe_metric("EURO KURU", "EUR/TRY"),
+            safe_metric("GRAM ALTIN SATIŞ", "Gram Altın Satış"),
+            safe_metric("ALTIN ONS SATIŞ", "Ons Satış"),
+            safe_metric("TLY FİYAT", "TLY", "{:,.4f}"),
+            safe_metric("DFI FİYAT", "DFI", "{:,.4f}"),
+        ]    
+        for i, (lab, val, chg) in enumerate(metrics):
+            m[i].metric(lab, val, chg)
 
         st.divider()
-        for cat in ["Döviz", "Altın", "Fonlar", "Hisseler", "Diğer"]:
-            sub = df_all[df_all["Kategori"] == cat]
-            if sub.empty:
-                continue
-            st.markdown(f"### {cat}")
+
+        # ---------- Sol: tüm kalemler ----------
+        c1, c2 = st.columns([1.25, 1])
+
+        with c1:
+            st.subheader("📌 Tüm Kalemler (Son değerler)")
+            cats = ["Hepsi"] + sorted(df_all["Kategori"].unique().tolist())
+            cat_sel = st.selectbox("Kategori filtrele", cats, key="mkt_cat")
+
+            show_df = df_all.copy()
+            if cat_sel != "Hepsi":
+                show_df = show_df[show_df["Kategori"] == cat_sel]
+
+            show_df = show_df.sort_values(["Kategori", "Kalem"])
             st.dataframe(
-                sub[["Kalem", "Son", "Günlük %"]].sort_values("Kalem").style.format({
+                show_df[["Kategori", "Kalem", "Son", "Günlük %"]].style.format({
                     "Son": "{:,.4f}",
                     "Günlük %": "%{:.2f}"
                 }),
@@ -695,107 +680,122 @@ def main():
                 hide_index=True
             )
 
-    # ---------- Sağ: grafik ----------
-    with c2:
-        st.subheader("📈 Kalem Grafiği")
+            st.divider()
+            for cat in ["Döviz", "Altın", "Fonlar", "Hisseler", "Diğer"]:
+                sub = df_all[df_all["Kategori"] == cat]
+                if sub.empty:
+                    continue
+                st.markdown(f"### {cat}")
+                st.dataframe(
+                    sub[["Kalem", "Son", "Günlük %"]].sort_values("Kalem").style.format({
+                        "Son": "{:,.4f}",
+                        "Günlük %": "%{:.2f}"
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
-        selectable_cols = [c for c in df_prices.columns if c != "Tarih"]
-        selected_col = st.selectbox("Grafiklemek istediğin kolon", selectable_cols, key="mkt_col")
+        # ---------- Sağ: grafik ----------
+        with c2:
+            st.subheader("📈 Kalem Grafiği")
 
-        category = classify_col(selected_col)
-        symbol = get_symbol_from_col(selected_col)
+            selectable_cols = [c for c in df_prices.columns if c != "Tarih"]
+            selected_col = st.selectbox("Grafiklemek istediğin kolon", selectable_cols, key="mkt_col")
 
-        # ✅ Fon periyotları (intraday yok)
-        fund_periods = ["1G", "3G", "1H", "2H", "1A", "2A", "3A", "6A", "1Y", "3Y"]
-        # ✅ Diğerleri için intraday dahil
-        other_periods = ["1m", "10m", "30m", "1s", "4s", "6s", "1G", "3G", "1H", "2H", "1A", "2A", "3A", "6A", "1Y", "3Y"]
+            category = classify_col(selected_col)
+            symbol = get_symbol_from_col(selected_col)
 
-        if category == "Fonlar":
-            period = st.selectbox("Periyot", fund_periods, index=3, key="mkt_per_fund")
-        else:
-            period = st.selectbox("Periyot", other_periods, index=6, key="mkt_per_other")  # default 1G
+            # ✅ Fon periyotları (intraday yok)
+            fund_periods = ["1G", "3G", "1H", "2H", "1A", "2A", "3A", "6A", "1Y", "3Y"]
+            # ✅ Diğerleri için intraday dahil
+            other_periods = ["1m", "10m", "30m", "1s", "4s", "6s", "1G", "3G", "1H", "2H", "1A", "2A", "3A", "6A", "1Y", "3Y"]
 
-        # --- Sheets'ten slice (fon/altın/döviz için iyi) ---
-        def slice_df_by_period(df: pd.DataFrame, per: str) -> pd.DataFrame:
-            if per.endswith("G"):   # gün
-                n = int(per[:-1])
-                return df.tail(n)
-            if per.endswith("H"):   # hafta
-                n = int(per[:-1]) * 7
-                return df.tail(n)
-            if per.endswith("A"):   # ay (30 gün approx)
-                n = int(per[:-1]) * 30
-                return df.tail(n)
-            if per.endswith("Y"):   # yıl (365 gün approx)
-                n = int(per[:-1]) * 365
-                return df.tail(n)
-            # intraday istendi ama Sheets'te intraday olmayabilir -> yine de tail(200) gösterelim
-            return df.tail(200)
+            if category == "Fonlar":
+                period = st.selectbox("Periyot", fund_periods, index=3, key="mkt_per_fund")
+            else:
+                period = st.selectbox("Periyot", other_periods, index=6, key="mkt_per_other")  # default 1G
 
-        # --- Hisselerde intraday için yfinance ---
-        def yf_fetch_intraday(sym: str, per: str):
-            # per: 1m,10m,30m,1s,4s,6s  (s = saat)
-            interval_map = {
-                "1m": ("5d", "1m"),
-                "10m": ("30d", "15m"),  # yfinance'da 10m yok, en yakın 15m
-                "30m": ("60d", "30m"),
-                "1s": ("60d", "60m"),
-                "4s": ("730d", "60m"),  # 4h için 60m ile çizip resample edeceğiz
-                "6s": ("730d", "60m"),
-            }
-            if per not in interval_map:
-                return None
-
-            prd, interval = interval_map[per]
-            try:
-                t = yf.Ticker(sym)
-                hist = t.history(period=prd, interval=interval)
-                if hist is None or hist.empty:
+            # --- Sheets'ten slice (fon/altın/döviz için iyi) ---
+            def slice_df_by_period(df: pd.DataFrame, per: str) -> pd.DataFrame:
+                if per.endswith("G"):   # gün
+                    n = int(per[:-1])
+                    return df.tail(n)
+                if per.endswith("H"):   # hafta
+                    n = int(per[:-1]) * 7
+                    return df.tail(n)
+                if per.endswith("A"):   # ay (30 gün approx)
+                    n = int(per[:-1]) * 30
+                    return df.tail(n)
+                if per.endswith("Y"):   # yıl (365 gün approx)
+                    n = int(per[:-1]) * 365
+                    return df.tail(n)
+                # intraday istendi ama Sheets'te intraday olmayabilir -> yine de tail(200) gösterelim
+                return df.tail(200)
+    
+            # --- Hisselerde intraday için yfinance ---
+            def yf_fetch_intraday(sym: str, per: str):
+                # per: 1m,10m,30m,1s,4s,6s  (s = saat)
+                interval_map = {
+                    "1m": ("5d", "1m"),
+                    "10m": ("30d", "15m"),  # yfinance'da 10m yok, en yakın 15m
+                    "30m": ("60d", "30m"),
+                    "1s": ("60d", "60m"),
+                    "4s": ("730d", "60m"),  # 4h için 60m ile çizip resample edeceğiz
+                    "6s": ("730d", "60m"),
+                }
+                if per not in interval_map:
                     return None
-                out = hist.reset_index()
-                # Datetime kolon adı bazen 'Datetime' bazen 'Date'
-                dt_col = "Datetime" if "Datetime" in out.columns else "Date"
-                out = out.rename(columns={dt_col: "Tarih"})
-                out["Fiyat"] = out["Close"].astype(float)
+    
+                prd, interval = interval_map[per]
+                try:
+                    t = yf.Ticker(sym)
+                    hist = t.history(period=prd, interval=interval)
+                    if hist is None or hist.empty:
+                        return None
+                    out = hist.reset_index()
+                    # Datetime kolon adı bazen 'Datetime' bazen 'Date'
+                    dt_col = "Datetime" if "Datetime" in out.columns else "Date"
+                    out = out.rename(columns={dt_col: "Tarih"})
+                    out["Fiyat"] = out["Close"].astype(float)
+    
+                    # 4s/6s istenirse saatlikten resample (basit)
+                    if per in ["4s", "6s"]:
+                        out = out.set_index("Tarih").resample("4H" if per == "4s" else "6H").last().dropna().reset_index()
+    
+                    return out[["Tarih", "Fiyat"]]
+                except:
+                    return None
+    
+            # Grafik kaynağı seçimi:
+            # - Fonlar: Sheets
+            # - Altın/Döviz: Sheets
+            # - Hisseler: intraday seçildiyse yfinance, değilse Sheets
+            use_intraday = period in ["1m", "10m", "30m", "1s", "4s", "6s"]
+    
+            df_plot = None
+    
+            if category == "Hisseler" and use_intraday:
+                df_plot = yf_fetch_intraday(symbol, period)
+                if df_plot is None:
+                    st.warning("Intraday veri çekilemedi (yfinance). Günlük görünüme geçmeyi dene.")
+            else:
+                df_slice = slice_df_by_period(df_prices, period)
+                if selected_col in df_slice.columns:
+                    tmp = df_slice[["Tarih", selected_col]].copy()
+                    tmp = tmp.rename(columns={selected_col: "Fiyat"}).dropna()
+                    df_plot = tmp
 
-                # 4s/6s istenirse saatlikten resample (basit)
-                if per in ["4s", "6s"]:
-                    out = out.set_index("Tarih").resample("4H" if per == "4s" else "6H").last().dropna().reset_index()
-
-                return out[["Tarih", "Fiyat"]]
-            except:
-                return None
-
-        # Grafik kaynağı seçimi:
-        # - Fonlar: Sheets
-        # - Altın/Döviz: Sheets
-        # - Hisseler: intraday seçildiyse yfinance, değilse Sheets
-        use_intraday = period in ["1m", "10m", "30m", "1s", "4s", "6s"]
-
-        df_plot = None
-
-        if category == "Hisseler" and use_intraday:
-            df_plot = yf_fetch_intraday(symbol, period)
-            if df_plot is None:
-                st.warning("Intraday veri çekilemedi (yfinance). Günlük görünüme geçmeyi dene.")
-        else:
-            df_slice = slice_df_by_period(df_prices, period)
-            if selected_col in df_slice.columns:
-                tmp = df_slice[["Tarih", selected_col]].copy()
-                tmp = tmp.rename(columns={selected_col: "Fiyat"}).dropna()
-                df_plot = tmp
-
-        if df_plot is None or df_plot.empty:
-            st.error("Grafik için veri yok.")
-        else:
-            fig = px.line(df_plot, x="Tarih", y="Fiyat")
-            fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, use_container_width=True)
-
-            # mini özet
-            last_val = float(df_plot["Fiyat"].iloc[-1])
-            prev_val = float(df_plot["Fiyat"].iloc[-2]) if len(df_plot) >= 2 else last_val
-            st.metric("Seçili Kalem Son", f"{last_val:,.4f}", f"%{pct_change(last_val, prev_val):.2f}")
-
-if __name__ == "__main__":
-    main()
+            if df_plot is None or df_plot.empty:
+                st.error("Grafik için veri yok.")
+            else:
+                fig = px.line(df_plot, x="Tarih", y="Fiyat")
+                fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
+                st.plotly_chart(fig, use_container_width=True)
+    
+                # mini özet
+                last_val = float(df_plot["Fiyat"].iloc[-1])
+                prev_val = float(df_plot["Fiyat"].iloc[-2]) if len(df_plot) >= 2 else last_val
+                st.metric("Seçili Kalem Son", f"{last_val:,.4f}", f"%{pct_change(last_val, prev_val):.2f}")
+    
+    if __name__ == "__main__":
+        main()
