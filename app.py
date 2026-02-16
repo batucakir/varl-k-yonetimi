@@ -247,6 +247,57 @@ def calculate_realized_pnl(df_trans):
                 positions[v]["maliyet"] -= avg_cost * adet
 
     return total_realized, month_realized, today_realized
+# --- CASHFLOW (Dış Para Girişi/Çıkışı) ---
+def calculate_external_cashflows(df_trans):
+    if df_trans.empty:
+        return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
+
+    df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
+
+    today = datetime.now().date()
+    this_month = datetime.now().month
+    this_year = datetime.now().year
+
+    total_in = 0.0
+    total_out = 0.0
+    month_net = 0.0
+    today_net = 0.0
+
+    for _, r in df.iterrows():
+        tur = str(r.get("Tür", "")).upper().strip()
+        varlik = str(r.get("Varlık", "")).upper().strip()
+        islem = str(r.get("İşlem", "")).upper().strip()
+        adet = float(r.get("Adet", 0) or 0)
+        tarih = r.get("Tarih")
+
+        # sadece TL Bakiye
+        if varlik != "TL BAKIYE":
+            continue
+
+        net = 0.0
+
+        # dış giriş
+        if tur in ["NAKİT_GİRİŞ", "NAKIT_GIRIS"]:
+            if islem == "ALIS":
+                total_in += adet
+                net = adet
+
+        # dış çıkış
+        elif tur in ["NAKİT_ÇIKIŞ", "NAKIT_CIKIS", "NAKİT_CIKIŞ"]:
+            if islem == "SATIS":
+                total_out += adet
+                net = -adet
+
+        else:
+            continue  # normal NAKİT trade hareketlerini saymıyoruz
+
+        if pd.notna(tarih):
+            if tarih.date() == today:
+                today_net += net
+            if tarih.month == this_month and tarih.year == this_year:
+                month_net += net
+
+    return total_in, total_out, month_net, today_net
 
 # --- CASHFLOW (Dış Para Girişi/Çıkışı) ---
 def calculate_external_cashflows(df_trans):
@@ -964,14 +1015,15 @@ def main():
                 else:
                     st.error("Bu sembolün fiyat kolonu bulunamadı.")
 
+                st.divider()
                 st.subheader("💸 Dış Nakit Akışı (Cashflow)")
                 
-                k1, k2, k3 = st.columns(3)
+                k1, k2, k3, k4 = st.columns(4)
                 
-                k1.metric("Toplam Para Girişi", pretty_metric(total_in / rate, curr))
-                k2.metric("Toplam Para Çıkışı", pretty_metric(total_out / rate, curr))
-                k3.metric("Bu Ay Net Cashflow", pretty_metric(month_net_cf / rate, curr))
-
+                k1.metric("Toplam Giriş", pretty_metric(total_in / rate, curr))
+                k2.metric("Toplam Çıkış", pretty_metric(total_out / rate, curr))
+                k3.metric("Bu Ay Net", pretty_metric(month_net_cf / rate, curr))
+                k4.metric("Bugün Net", pretty_metric(today_net_cf / rate, curr))
 
 if __name__ == "__main__":
     main()
