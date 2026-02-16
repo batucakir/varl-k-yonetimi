@@ -443,11 +443,18 @@ def main():
 
     if page == "Portföyüm":
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
+        total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
         tabs = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
 
         for i, (tab, curr, rate) in enumerate(zip(tabs, ["TL", "$", "€"], [1.0, usd if usd > 0 else 1.0, eur if eur > 0 else 1.0])):
             with tab:
                 c1, c2, c3 = st.columns(3)
+                c4, c5, c6 = st.columns(3)
+                
+                c4.metric("Toplam Realized", f"{format_tr_money(total_realized / rate)} {curr}")
+                c5.metric("Bu Ay Realized", f"{format_tr_money(month_realized / rate)} {curr}")
+                c6.metric("Bugün Realized", f"{format_tr_money(today_realized / rate)} {curr}")
+
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
                 c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
                 c3.metric("Kâr Oranı", f"%{((df_view['Net Kâr'].sum() / df_view['Maliyet'].sum()) * 100) if (not df_view.empty and df_view['Maliyet'].sum() > 0) else 0:,.2f}")
