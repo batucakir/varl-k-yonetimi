@@ -247,6 +247,68 @@ def calculate_realized_pnl(df_trans):
                 positions[v]["maliyet"] -= avg_cost * adet
 
     return total_realized, month_realized, today_realized
+# --- AYLIK REALIZED ÖZET ---
+def realized_monthly_summary(df_trans):
+    if df_trans.empty:
+        return pd.DataFrame(columns=["Ay", "Realized", "Satış Adedi", "Win Rate %"])
+
+    df = df_trans.sort_values("Tarih").copy()
+    df = df.dropna(subset=["Tarih"])
+
+    positions = {}
+    rows = []
+
+    for _, row in df.iterrows():
+        v = str(row.get("Varlık", "")).strip()
+        islem = str(row.get("İşlem", "")).upper().strip()
+        adet = float(row.get("Adet", 0) or 0)
+        fiyat = float(row.get("Fiyat", 0) or 0)
+        tarih = row.get("Tarih")
+
+        if not v:
+            continue
+
+        if v not in positions:
+            positions[v] = {"adet": 0.0, "maliyet": 0.0}
+
+        if islem == "ALIS":
+            positions[v]["adet"] += adet
+            positions[v]["maliyet"] += adet * fiyat
+
+        elif islem == "SATIS":
+            realized = 0.0
+            if positions[v]["adet"] > 0:
+                avg_cost = positions[v]["maliyet"] / positions[v]["adet"]
+                realized = (fiyat - avg_cost) * adet
+
+                positions[v]["adet"] -= adet
+                positions[v]["maliyet"] -= avg_cost * adet
+
+            # satış kaydı (TL Bakiye satışları genelde 0 realized verir; sorun değil)
+            rows.append({
+                "Ay": tarih.strftime("%Y-%m"),
+                "Realized": realized
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=["Ay", "Realized", "Satış Adedi", "Win Rate %"])
+
+    df_sales = pd.DataFrame(rows)
+
+    # Aylık toplam realized
+    g = df_sales.groupby("Ay")["Realized"].sum().reset_index()
+
+    # Satış adedi (kaç satış işlemi var)
+    cnt = df_sales.groupby("Ay")["Realized"].count().reset_index().rename(columns={"Realized": "Satış Adedi"})
+
+    # Win rate: realized > 0 olan satışların oranı
+    win = df_sales.assign(Win=df_sales["Realized"] > 0).groupby("Ay")["Win"].mean().reset_index()
+    win["Win Rate %"] = win["Win"] * 100
+    win = win.drop(columns=["Win"])
+
+    out = g.merge(cnt, on="Ay", how="left").merge(win, on="Ay", how="left")
+    out = out.sort_values("Ay", ascending=False)
+    return out
 
 # --- SERVET TRENDİ (DOĞRU HESAP: SADECE O TARİHE KADAR İŞLEMLER) ---
 def prepare_historical_trend(df_prices, df_trans, rate=1.0):
@@ -459,7 +521,28 @@ def main():
                 c4.metric("Toplam Realized", pretty_metric(total_realized / rate, curr))
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
+
+                st.divider()
+                st.subheader("🧾 Aylık Realized Özeti")
                 
+                df_month = realized_monthly_summary(df_trans)
+                
+                if df_month.empty:
+                    st.info("Henüz satış işlemi yok.")
+                else:
+                    # TL sekmesinde TL, USD sekmesinde USD göstermek için rate kullan
+                    df_show = df_month.copy()
+                    df_show["Realized"] = df_show["Realized"] / rate
+                
+                    st.dataframe(
+                        df_show.style.format({
+                            "Realized": "{:,.2f}",
+                            "Win Rate %": "%{:.1f}"
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
 
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
                 c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
