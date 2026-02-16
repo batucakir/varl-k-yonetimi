@@ -111,6 +111,9 @@ def load_data():
         ws_trans = sheet.worksheet("Islemler")
         data_trans = ws_trans.get_all_values()
         df_trans = pd.DataFrame(data_trans[1:], columns=data_trans[0]) if len(data_trans) > 1 else pd.DataFrame(columns=["Tarih","Tür","Varlık","İşlem","Adet","Fiyat"])
+        if "Kaynak" not in df_trans.columns:
+            df_trans["Kaynak"] = ""
+
         if not df_trans.empty:
             df_trans['Adet'] = df_trans['Adet'].apply(clean_numeric)
             df_trans['Fiyat'] = df_trans['Fiyat'].apply(clean_numeric)
