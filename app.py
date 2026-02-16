@@ -44,7 +44,6 @@ MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
 def clean_numeric(value):
     if pd.isna(value) or value == "" or value is None: return 0.0
     s = str(value).strip()
-    if not s: return 0.0
     if "." in s and "," in s: s = s.replace(".", "").replace(",", ".")
     elif "," in s: s = s.replace(",", ".")
     try: return float(s)
@@ -151,29 +150,57 @@ def prepare_historical_trend(df_prices, df_trans, rate=1.0):
         if tot > 0: trend_data.append({"Tarih": cd, "Toplam Servet": tot/rate})
     return pd.DataFrame(trend_data)
 
+# --- REBALANS ASİSTANI ---
+def render_rebalance_assistant(df_view):
+    st.subheader("⚖️ Portföy Rebalans Asistanı")
+    df_grp = df_view.groupby("Grup")["Net Değer"].sum().reset_index()
+    total_val = df_grp["Net Değer"].sum()
+    cols = st.columns(len(df_grp))
+    target_ratios = {}
+    for i, row in df_grp.iterrows():
+        target_ratios[row["Grup"]] = cols[i].number_input(f"Hedef % ({row['Grup']})", 0, 100, int(100/len(df_grp)), key=f"reb_val_{i}")
+    analysis = []
+    for i, row in df_grp.iterrows():
+        fark = ((total_val * target_ratios[row["Grup"]]) / 100) - row["Net Değer"]
+        aks = f"✅ {format_tr_money(fark)} TL AL" if fark > 1000 else f"🚨 {format_tr_money(abs(fark))} TL SAT" if fark < -1000 else "🆗 Dengeli"
+        analysis.append({"Grup": row["Grup"], "Mevcut Değer": row["Net Değer"], "Mevcut Oran": f"%{(row['Net Değer']/total_val*100):.1f}", "Hedef Oran": f"%{target_ratios[row['Grup']]:.1f}", "Aksiyon": aks})
+    st.dataframe(pd.DataFrame(analysis), use_container_width=True, hide_index=True)
+
 # --- ANA PROGRAM ---
 def main():
     df_prices, df_trans, watchlist = load_data()
     if df_prices.empty: st.stop()
     
     with st.sidebar:
-        st.header("💎 Varlık Paneli")
+        st.markdown("<h1 style='text-align: center; color: #4e8cff;'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
         last = df_prices.iloc[-1]
         usd, eur = last["DOLAR KURU"], last["EURO KURU"]
-        st.markdown(f'<div class="currency-card">🇺🇸 USD: {usd:.2f} ₺ | 🇪🇺 EUR: {eur:.2f} ₺</div>', unsafe_allow_html=True)
-        page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"])
-        if st.button("🔄 Verileri Yenile"): st.cache_data.clear(); st.rerun()
+        st.markdown(f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div><div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>', unsafe_allow_html=True)
+        page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
+        if st.button("🔄 Verileri Yenile", use_container_width=True): st.cache_data.clear(); st.rerun()
+        
         with st.expander("➕ İşlem Ekle"):
-            with st.form("add"):
-                f_date, f_tur = st.date_input("Tarih", datetime.now()), st.selectbox("Tür", ["ALTIN", "FON", "HİSSE", "NAKİT", "DÖVİZ"])
-                f_varlik = st.selectbox("Varlık", ["TLY FONU", "DFI FONU", "TP2 FONU", "TL Bakiye", "22 AYAR BİLEZİK (Gr)", "ATA ALTIN (Adet)"] + [x + " (Hisse)" for x in watchlist if ".IS" in x])
-                f_islem, f_adet, f_fiyat = st.selectbox("İşlem", ["ALIS", "SATIS"]), st.number_input("Adet", 0.0), st.number_input("Fiyat", 0.0)
+            with st.form("add_trans"):
+                f_date = st.date_input("Tarih", datetime.now())
+                f_tur = st.selectbox("Tür", ["ALTIN", "FON", "HİSSE", "NAKİT", "DÖVİZ"])
+                f_varlik = st.selectbox("Varlık", ["TLY FONU", "DFI FONU", "TP2 FONU", "TL Bakiye", "22 AYAR BİLEZİK (Gr)", "ATA ALTIN (Adet)"] + [x + " (Hisse)" for x in watchlist])
+                f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
+                f_adet = st.number_input("Adet", 0.0, step=0.01)
+                f_fiyat = st.number_input("Fiyat", 0.0, step=0.01)
                 if st.form_submit_button("Kaydet"):
                     try:
                         client = get_client(); sheet = client.open(SHEET_NAME); ws = sheet.worksheet("Islemler")
                         ws.append_row([f_date.strftime("%d.%m.%Y"), f_tur, f_varlik, f_islem, str(f_adet).replace(".", ","), str(f_fiyat).replace(".", ",")], value_input_option='USER_ENTERED')
                         st.success("✅ Eklendi"); time.sleep(1); st.cache_data.clear(); st.rerun()
                     except: st.error("Hata!")
+
+        with st.expander("🛠️ Takip Listesi"):
+            ns = st.text_input("Hisse Sembolü (Örn: SASA.IS)")
+            if st.button("Takibe Ekle", use_container_width=True): 
+                try:
+                    client = get_client(); sheet = client.open(SHEET_NAME); ws = sheet.worksheet(CONFIG_SHEET_NAME)
+                    if ns not in ws.col_values(1): ws.append_row([ns]); st.success("Eklendi"); time.sleep(1); st.cache_data.clear(); st.rerun()
+                except: pass
 
     if page == "Portföyüm":
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
@@ -198,24 +225,21 @@ def main():
                 if not df_trend.empty:
                     fig_t = px.area(df_trend, x="Tarih", y="Toplam Servet")
                     fig_t.update_layout(yaxis_range=[df_trend["Toplam Servet"].min()*0.98, df_trend["Toplam Servet"].max()*1.02], height=400)
-                    st.plotly_chart(fig_t, use_container_width=True, key=f"trend_{i}")
+                    st.plotly_chart(fig_t, use_container_width=True, key=f"trend_chart_{i}")
                 
-                # --- PIE CHART & DAĞILIM SEKMLERİ ---
                 col1, col2 = st.columns(2)
                 with col1:
                     st.subheader("🍕 Varlık Dağılımı")
-                    view_mode = st.radio("Dağılım Tipi", ["Ana Gruplar", "Varlık Bazlı"], horizontal=True, key=f"vmode_{i}")
+                    view_mode = st.radio("Görünüm", ["Ana Gruplar", "Varlık Bazlı (Kırılımlı)"], horizontal=True, key=f"v_mode_{i}")
                     g_col = "Grup" if view_mode == "Ana Gruplar" else "Varlık"
                     df_p = df_view.groupby(g_col)["Net Değer"].sum().reset_index()
                     c_map = {"ALTIN": "#FFD700", "FON": "#2ca02c", "NAKİT": "#1f77b4", "HİSSE": "#d62728"}
-                    fig_p = px.pie(df_p, values="Net Değer", names=g_col, hole=0.4, 
-                                   color=g_col if view_mode == "Ana Gruplar" else None,
-                                   color_discrete_map=c_map if view_mode == "Ana Gruplar" else None)
-                    st.plotly_chart(fig_p, use_container_width=True, key=f"pie_{i}")
+                    fig_p = px.pie(df_p, values="Net Değer", names=g_col, hole=0.4, color=g_col if view_mode == "Ana Gruplar" else None, color_discrete_map=c_map if view_mode == "Ana Gruplar" else None)
+                    st.plotly_chart(fig_p, use_container_width=True, key=f"pie_chart_{i}")
                 with col2:
                     st.subheader("📊 Kâr/Zarar Durumu")
                     fig_b = go.Figure([go.Bar(name='Net Değer', x=df_view['Varlık'], y=df_view['Net Değer']/rate, marker_color='forestgreen')])
-                    st.plotly_chart(fig_b, use_container_width=True, key=f"bar_{i}")
+                    st.plotly_chart(fig_b, use_container_width=True, key=f"bar_chart_{i}")
 
                 st.subheader("📋 Detaylı Varlık Listesi")
                 df_show = df_view.copy()
@@ -225,11 +249,16 @@ def main():
 
                 if curr == "TL":
                     st.divider()
-                    st.subheader("🥇 Altın Makas")
+                    st.subheader("🥇 Kıymetli Metal Alım-Satım Farkları")
                     gm = st.columns(4)
                     for idx, (n, k) in enumerate([("Gram", "GRAM ALTIN"), ("Ata", "ATA ALTIN"), ("22 Ayar", "22 AYAR ALTIN"), ("Çeyrek", "ÇEYREK ALTIN")]):
                         s, a = last.get(f"{k} SATIŞ", 0), last.get(f"{k} ALIŞ", 0)
-                        gm[idx].metric(n, f"{s:,.2f} ₺", f"Makas: {s-a:,.2f}")
+                        diff = s - a
+                        p_diff = (diff / s) * 100 if s > 0 else 0
+                        gm[idx].metric(n, f"{s:,.2f} ₺", f"Makas: {diff:,.2f} ₺ (%{p_diff:.2f})")
+                    st.divider()
+                    render_rebalance_assistant(df_view)
 
-if __name__ == "__main__":
-    main()
+    elif page == "Piyasa Takip":
+        st.markdown("## 🌍 Detaylı Piyasa Analizi")
+        # Piyasa takip kodu burada devam eder...
