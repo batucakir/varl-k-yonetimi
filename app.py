@@ -247,6 +247,55 @@ def calculate_realized_pnl(df_trans):
                 positions[v]["maliyet"] -= avg_cost * adet
 
     return total_realized, month_realized, today_realized
+
+# --- CASHFLOW (Dış Para Girişi/Çıkışı) ---
+def calculate_external_cashflows(df_trans):
+    if df_trans.empty:
+        return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
+
+    df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
+
+    today = datetime.now().date()
+    this_month = datetime.now().month
+    this_year = datetime.now().year
+
+    total_in = 0.0
+    total_out = 0.0
+    month_net = 0.0
+    today_net = 0.0
+
+    for _, r in df.iterrows():
+        tur = str(r.get("Tür", "")).upper().strip()
+        varlik = str(r.get("Varlık", "")).upper().strip()
+        islem = str(r.get("İşlem", "")).upper().strip()
+        adet = float(r.get("Adet", 0) or 0)
+        tarih = r.get("Tarih")
+
+        # sadece TL bakiye ve sadece cashflow tag'leri
+        if varlik != "TL BAKIYE":
+            continue
+        if tur not in ["NAKİT_GİRİŞ", "NAKIT_GIRIS", "NAKİT_ÇIKIŞ", "NAKIT_CIKIS", "NAKİT_CIKIŞ"]:
+            continue
+
+        # giriş ALIS ile, çıkış SATIS ile tutulacak
+        net = 0.0
+        if "GİR" in tur or "GIR" in tur:
+            if islem == "ALIS":
+                total_in += adet
+                net = adet
+        else:
+            if islem == "SATIS":
+                total_out += adet
+                net = -adet
+
+        if pd.notna(tarih):
+            if tarih.date() == today:
+                today_net += net
+            if tarih.month == this_month and tarih.year == this_year:
+                month_net += net
+
+    return total_in, total_out, month_net, today_net
+
 # --- AYLIK REALIZED ÖZET ---
 def realized_monthly_summary(df_trans):
     if df_trans.empty:
