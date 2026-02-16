@@ -652,6 +652,7 @@ def main():
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
         total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
         total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
+        df_cf = external_cashflow_table(df_trans, limit=30)
 
         tabs = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
 
@@ -663,6 +664,36 @@ def main():
                 c4.metric("Toplam Realized", pretty_metric(total_realized / rate, curr))
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
+                
+                st.subheader("💸 Dış Nakit Akışı (Cashflow)")
+                
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Toplam Giriş", pretty_metric(total_in / rate, curr))
+                k2.metric("Toplam Çıkış", pretty_metric(total_out / rate, curr))
+                
+                # net değerleri TL bazlı hesapladık; rate ile dönüştürüp gösteriyoruz
+                k3.metric("Bu Ay Net", pretty_metric(month_net_cf / rate, curr))
+                k4.metric("Bugün Net", pretty_metric(today_net_cf / rate, curr))
+                
+                # Detay tablo (aynı ekranda kanıt)
+                if df_cf.empty:
+                    st.caption("Henüz DIS_GIRIS / DIS_CIKIS cashflow kaydı yok.")
+                else:
+                    df_cf_show = df_cf.copy()
+                    df_cf_show["Adet"] = df_cf_show["Adet"] / rate
+                    df_cf_show["Net"] = df_cf_show["Net"] / rate
+                
+                    st.dataframe(
+                        df_cf_show.style.format({
+                            "Adet": "{:,.2f}",
+                            "Net": "{:,.2f}",
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                
+                st.divider()
+
 
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
                 c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
