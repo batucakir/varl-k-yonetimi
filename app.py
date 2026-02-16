@@ -510,92 +510,237 @@ def main():
                     st.divider()
                     if not df_view.empty:
                         render_rebalance_assistant(df_view)
+elif page == "Piyasa Takip":
+    st.markdown("## 🌍 Detaylı Piyasa Analizi")
 
-    elif page == "Piyasa Takip":
-        st.markdown("## 🌍 Detaylı Piyasa Analizi")
+    last = df_prices.iloc[-1]
+    prev = df_prices.iloc[-2] if len(df_prices) >= 2 else last
 
-        last = df_prices.iloc[-1]
-        prev = df_prices.iloc[-2] if len(df_prices) >= 2 else last
+    # Üst metrikler
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("USD/TRY", f"{float(last.get('DOLAR KURU', 0) or 0):.2f}")
+    m2.metric("EUR/TRY", f"{float(last.get('EURO KURU', 0) or 0):.2f}")
+    m3.metric("Gram Altın (Satış)", f"{float(last.get('GRAM ALTIN SATIŞ', 0) or 0):,.2f} ₺")
+    m4.metric("Ons (Satış)", f"{float(last.get('ALTIN ONS SATIŞ', 0) or 0):,.2f}")
 
-        # Üst metrikler
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("USD/TRY", f"{float(last.get('DOLAR KURU', 0) or 0):.2f}")
-        m2.metric("EUR/TRY", f"{float(last.get('EURO KURU', 0) or 0):.2f}")
-        m3.metric("Gram Altın (Satış)", f"{float(last.get('GRAM ALTIN SATIŞ', 0) or 0):,.2f} ₺")
-        m4.metric("Ons (Satış)", f"{float(last.get('ALTIN ONS SATIŞ', 0) or 0):,.2f}")
+    st.divider()
 
-        st.divider()
+    # --- Yardımcılar ---
+    def find_price_column_for_symbol(symbol: str):
+        s = str(symbol).strip()
 
-        # Sheets kolonundan sembol yakalayıcı
-        def find_price_column_for_symbol(symbol: str):
-            s = str(symbol).strip()
-            # en olası: "SASA.IS FİYAT"
-            if f"{s} FİYAT" in df_prices.columns:
-                return f"{s} FİYAT"
-            if f"{s} FIYAT" in df_prices.columns:
-                return f"{s} FIYAT"
-            # fallback: içinde geçeni bul
-            candidates = [c for c in df_prices.columns if s in c]
-            if candidates:
-                for c in candidates:
-                    if "FİYAT" in c.upper() or "FIYAT" in c.upper():
-                        return c
-                return candidates[0]
-            return None
+        # 1) Tam eşleşme: "SASA.IS FİYAT"
+        if f"{s} FİYAT" in df_prices.columns:
+            return f"{s} FİYAT"
+        if f"{s} FIYAT" in df_prices.columns:
+            return f"{s} FIYAT"
 
-        # Watchlist tablosu
-        rows = []
-        for sym in watchlist:
-            col = find_price_column_for_symbol(sym)
-            if not col:
+        # 2) Fonlar bazen direkt "TLY" kolonu olabilir
+        if s in df_prices.columns:
+            return s
+
+        # 3) İçinde geçen kolonları bul (fallback)
+        candidates = [c for c in df_prices.columns if s in str(c)]
+        if candidates:
+            for c in candidates:
+                cu = str(c).upper()
+                if "FİYAT" in cu or "FIYAT" in cu:
+                    return c
+            return candidates[0]
+        return None
+
+    def extract_symbols_from_transactions(df_trans):
+        """
+        İşlemler sayfasındaki 'Varlık' alanından sembol çıkar:
+        - "TLY FONU" -> "TLY"
+        - "THYAO.IS (Hisse)" -> "THYAO.IS"
+        - "ASELS.IS (Hisse)" -> "ASELS.IS"
+        """
+        syms = set()
+        if df_trans is None or df_trans.empty:
+            return syms
+
+        for v in df_trans["Varlık"].dropna().astype(str).tolist():
+            vv = v.strip()
+
+            # Hisse formatı: "XXX.IS (Hisse)"
+            if "(Hisse)" in vv or "(HİSSE)" in vv:
+                s = vv.replace("(Hisse)", "").replace("(HİSSE)", "").strip()
+                syms.add(s)
                 continue
-            lp = float(last.get(col, 0) or 0)
-            pp = float(prev.get(col, 0) or 0)
-            chg = ((lp - pp) / pp) * 100 if pp > 0 else 0
-            rows.append({"Sembol": sym, "Fiyat": lp, "Günlük %": chg, "Kolon": col})
 
-        df_mkt = pd.DataFrame(rows).sort_values("Günlük %", ascending=False) if rows else pd.DataFrame(columns=["Sembol", "Fiyat", "Günlük %", "Kolon"])
+            # Fon formatı: "TLY FONU"
+            if "FONU" in vv.upper():
+                code = vv.upper().replace("FONU", "").strip()
+                # "TLY" gibi
+                if 2 <= len(code) <= 5:
+                    syms.add(code)
+                continue
 
-        c1, c2 = st.columns([1, 1.2])
+            # Direkt yazılmış olabilir
+            syms.add(vv)
 
-        with c1:
-            st.subheader("📋 Watchlist Özeti")
-            if df_mkt.empty:
-                st.warning("Watchlist boş veya Sheets'te ilgili fiyat kolonları bulunamadı.")
-                st.caption("İpucu: Bot'un header'ı genelde 'SASA.IS FİYAT' şeklinde olmalı.")
-            else:
-                st.dataframe(
-                    df_mkt.drop(columns=["Kolon"]).style.format({"Fiyat": "{:,.2f}", "Günlük %": "%{:.2f}"}),
-                    use_container_width=True,
-                    hide_index=True
-                )
+        return syms
 
-        with c2:
-            st.subheader("📈 Seçili Varlık Grafiği")
-            if df_mkt.empty:
-                st.info("Grafik için watchlist'e sembol eklemen gerekiyor.")
-            else:
-                selected = st.selectbox("Sembol seç", df_mkt["Sembol"].tolist())
-                col = find_price_column_for_symbol(selected)
+    def build_universe_symbols():
+        """
+        Universe:
+        1) watchlist
+        2) işlemlerden gelen semboller
+        3) sheet'te *FİYAT/*FIYAT ile biten kolonlardan sembol
+        """
+        syms = set()
 
-                period = st.radio("Periyot", ["30G", "90G", "180G", "Tümü"], horizontal=True)
-                if period == "30G":
-                    df_slice = df_prices.tail(30)
-                elif period == "90G":
-                    df_slice = df_prices.tail(90)
-                elif period == "180G":
-                    df_slice = df_prices.tail(180)
-                else:
-                    df_slice = df_prices
+        # 1) watchlist
+        for w in (watchlist or []):
+            if w:
+                syms.add(str(w).strip())
 
-                if col and col in df_slice.columns:
-                    df_plot = df_slice[["Tarih", col]].copy()
-                    df_plot = df_plot.rename(columns={col: "Fiyat"}).dropna()
-                    fig = px.line(df_plot, x="Tarih", y="Fiyat")
-                    fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.error("Bu sembolün fiyat kolonu bulunamadı.")
+        # 2) işlemlerden
+        syms |= extract_symbols_from_transactions(df_trans)
 
-if __name__ == "__main__":
-    main()
+        # 3) sheet fiyat kolonlarından
+        for c in df_prices.columns:
+            cu = str(c).upper()
+            if cu.endswith("FİYAT") or cu.endswith("FIYAT"):
+                base = str(c).replace(" FİYAT", "").replace(" FIYAT", "").strip()
+                if base:
+                    syms.add(base)
+
+        # Temizle / sırala
+        syms = [s for s in syms if s and s.lower() != "nan"]
+        syms = sorted(syms)
+        return syms
+
+    def price_on_or_before(df, col, target_dt: pd.Timestamp):
+        """
+        target_dt'den önceki (veya eşit) en yakın satırdaki fiyat.
+        """
+        if df.empty or col not in df.columns:
+            return None
+        sub = df[df["Tarih"] <= target_dt]
+        if sub.empty:
+            return None
+        return float(sub.iloc[-1][col] or 0)
+
+    # --- Universe oluştur ---
+    universe = build_universe_symbols()
+
+    # Sadece sheet'te kolon karşılığı olanları tut
+    universe_with_cols = []
+    sym_to_col = {}
+    for s in universe:
+        col = find_price_column_for_symbol(s)
+        if col:
+            universe_with_cols.append(s)
+            sym_to_col[s] = col
+
+    if not universe_with_cols:
+        st.warning("Sheet'te fiyat kolonları bulunamadı. (Örn kolon adı: 'SASA.IS FİYAT' gibi olmalı)")
+        st.stop()
+
+    # --- Watchlist tablosu (Universe içinden) ---
+    rows = []
+    for sym in universe_with_cols:
+        col = sym_to_col[sym]
+        lp = float(last.get(col, 0) or 0)
+        pp = float(prev.get(col, 0) or 0)
+        chg = ((lp - pp) / pp) * 100 if pp > 0 else 0
+        rows.append({"Sembol": sym, "Fiyat": lp, "Günlük %": chg})
+
+    df_mkt = pd.DataFrame(rows).sort_values("Günlük %", ascending=False)
+
+    c1, c2 = st.columns([1, 1.2])
+
+    with c1:
+        st.subheader("📋 Piyasa Özeti")
+        st.dataframe(
+            df_mkt.style.format({"Fiyat": "{:,.2f}", "Günlük %": "%{:.2f}"}),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    with c2:
+        st.subheader("📈 Seçili Varlık Grafiği")
+        selected = st.selectbox("Sembol seç", universe_with_cols, index=0)
+        col = sym_to_col[selected]
+
+        period = st.radio("Periyot", ["30G", "90G", "180G", "Tümü"], horizontal=True)
+        if period == "30G":
+            df_slice = df_prices.tail(30)
+        elif period == "90G":
+            df_slice = df_prices.tail(90)
+        elif period == "180G":
+            df_slice = df_prices.tail(180)
+        else:
+            df_slice = df_prices
+
+        df_plot = df_slice[["Tarih", col]].copy().rename(columns={col: "Fiyat"}).dropna()
+        fig = px.line(df_plot, x="Tarih", y="Fiyat")
+        fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # --- Zamansal değişim tabloları (senin istediğin kısım) ---
+    st.subheader("🧭 Zamansal Değişim Tablosu")
+
+    # Burayı istersen birebir senin eski aralıklarına göre ayarlarız
+    horizons = [
+        ("1G", 1),
+        ("7G", 7),
+        ("30G", 30),
+        ("90G", 90),
+        ("180G", 180),
+        ("365G", 365),
+    ]
+
+    now_dt = df_prices["Tarih"].iloc[-1]
+    start_of_year = pd.Timestamp(year=now_dt.year, month=1, day=1)
+
+    # Seçili varlık için tablo
+    col = sym_to_col[selected]
+    p_now = float(last.get(col, 0) or 0)
+
+    out = []
+
+    # YTD
+    p_ytd = price_on_or_before(df_prices, col, start_of_year)
+    if p_ytd and p_ytd > 0:
+        out.append({
+            "Periyot": "YTD",
+            "Başlangıç": p_ytd,
+            "Şimdi": p_now,
+            "Değişim": p_now - p_ytd,
+            "Değişim %": ((p_now - p_ytd) / p_ytd) * 100
+        })
+    else:
+        out.append({"Periyot": "YTD", "Başlangıç": np.nan, "Şimdi": p_now, "Değişim": np.nan, "Değişim %": np.nan})
+
+    # Diğer periyotlar
+    for label, days in horizons:
+        t0 = now_dt - pd.Timedelta(days=days)
+        p0 = price_on_or_before(df_prices, col, t0)
+        if p0 and p0 > 0:
+            out.append({
+                "Periyot": label,
+                "Başlangıç": p0,
+                "Şimdi": p_now,
+                "Değişim": p_now - p0,
+                "Değişim %": ((p_now - p0) / p0) * 100
+            })
+        else:
+            out.append({"Periyot": label, "Başlangıç": np.nan, "Şimdi": p_now, "Değişim": np.nan, "Değişim %": np.nan})
+
+    df_perf = pd.DataFrame(out)
+
+    st.dataframe(
+        df_perf.style.format({
+            "Başlangıç": "{:,.2f}",
+            "Şimdi": "{:,.2f}",
+            "Değişim": "{:,.2f}",
+            "Değişim %": "%{:.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
