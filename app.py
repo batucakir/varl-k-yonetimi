@@ -61,6 +61,15 @@ def format_tr_money(value):
         return "{:,.2f}".format(float(value)).replace(",", "X").replace(".", ",").replace("X", ".")
     except:
         return str(value)
+        
+def pretty_metric(value, currency="TL"):
+    try:
+        v = float(value or 0.0)
+    except:
+        v = 0.0
+    if abs(v) < 1e-12:
+        return f"0 {currency}"
+    return f"{format_tr_money(v)} {currency}"
 
 # --- VERİ BAĞLANTISI ---
 def get_client():
@@ -615,11 +624,6 @@ def main():
                 c1, c2, c3 = st.columns(3)
                 c4, c5, c6 = st.columns(3)
                 
-                def pretty_metric(value, currency):
-                    if abs(value) == 0:
-                        return "0 TL"
-                    return f"{format_tr_money(value)} {currency}"
-                
                 c4.metric("Toplam Realized", pretty_metric(total_realized / rate, curr))
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
@@ -1014,16 +1018,6 @@ def main():
 
                 else:
                     st.error("Bu sembolün fiyat kolonu bulunamadı.")
-
-                st.divider()
-                st.subheader("💸 Dış Nakit Akışı (Cashflow)")
-                
-                k1, k2, k3, k4 = st.columns(4)
-                
-                k1.metric("Toplam Giriş", pretty_metric(total_in / rate, curr))
-                k2.metric("Toplam Çıkış", pretty_metric(total_out / rate, curr))
-                k3.metric("Bu Ay Net", pretty_metric(month_net_cf / rate, curr))
-                k4.metric("Bugün Net", pretty_metric(today_net_cf / rate, curr))
 
 if __name__ == "__main__":
     main()
