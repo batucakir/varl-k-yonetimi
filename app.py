@@ -452,7 +452,7 @@ def main():
                 c4, c5, c6 = st.columns(3)
                 
                 def pretty_metric(value, currency):
-                    if abs(value) = 0:
+                    if abs(value) == 0:
                         return "0 TL"
                     return f"{format_tr_money(value)} {currency}"
                 
