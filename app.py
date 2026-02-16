@@ -635,7 +635,7 @@ def main():
                     st.divider()
                     if not df_view.empty:
                         render_rebalance_assistant(df_view)
-                                st.divider()
+                st.divider()
                         
                 st.subheader("🧾 Aylık Realized Özeti")
                 
