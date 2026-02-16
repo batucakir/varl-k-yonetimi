@@ -80,11 +80,6 @@ def get_client():
 
 @st.cache_data(ttl=60)
 def load_data():
-    """
-    ✅ DÜZELTME:
-    - Bot bazen fiyatları 0 yazınca grafikte dikey çakılma oluyordu.
-    - 0'ları "eksik veri" gibi kabul edip ffill ile dolduruyoruz.
-    """
     try:
         client = get_client()
         sheet = client.open(SHEET_NAME)
@@ -118,6 +113,9 @@ def load_data():
             df_trans['Adet'] = df_trans['Adet'].apply(clean_numeric)
             df_trans['Fiyat'] = df_trans['Fiyat'].apply(clean_numeric)
             df_trans['Tarih'] = pd.to_datetime(df_trans['Tarih'], dayfirst=True, errors='coerce')
+            # ✅ Kaynak kolonu yoksa (eski sheet'ler için) oluştur
+            if "Kaynak" not in df_trans.columns:
+                df_trans["Kaynak"] = ""
 
         # Watchlist
         try:
@@ -296,12 +294,21 @@ def calculate_realized_pnl(df_trans):
 
     return total_in, total_out, month_net, today_net
 
-# --- CASHFLOW (Dış Para Girişi/Çıkışı) ---
 def calculate_external_cashflows(df_trans):
+    """
+    Dış nakit akışı sadece TL Bakiye satırlarında ve Kaynak alanına göre sayılır:
+      - DIS_GIRIS  + ALIS  => dışarıdan para girişi
+      - DIS_CIKIS  + SATIS => dışarıya para çıkışı
+    PORTFOY_ICI hareketler (altın satıp TL’ye geçmek gibi) cashflow sayılmaz.
+    """
     if df_trans.empty:
         return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
 
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
+
+    # Kaynak kolonu yoksa güvenli şekilde ekle
+    if "Kaynak" not in df.columns:
+        df["Kaynak"] = ""
 
     today = datetime.now().date()
     this_month = datetime.now().month
@@ -313,28 +320,28 @@ def calculate_external_cashflows(df_trans):
     today_net = 0.0
 
     for _, r in df.iterrows():
-        tur = str(r.get("Tür", "")).upper().strip()
         varlik = str(r.get("Varlık", "")).upper().strip()
         islem = str(r.get("İşlem", "")).upper().strip()
+        kaynak = str(r.get("Kaynak", "")).upper().strip()
         adet = float(r.get("Adet", 0) or 0)
         tarih = r.get("Tarih")
 
-        # sadece TL bakiye ve sadece cashflow tag'leri
+        # sadece TL Bakiye satırları
         if varlik != "TL BAKIYE":
             continue
-        if tur not in ["NAKİT_GİRİŞ", "NAKIT_GIRIS", "NAKİT_ÇIKIŞ", "NAKIT_CIKIS", "NAKİT_CIKIŞ"]:
-            continue
 
-        # giriş ALIS ile, çıkış SATIS ile tutulacak
         net = 0.0
-        if "GİR" in tur or "GIR" in tur:
-            if islem == "ALIS":
-                total_in += adet
-                net = adet
+
+        if kaynak == "DIS_GIRIS" and islem == "ALIS":
+            total_in += adet
+            net = adet
+
+        elif kaynak == "DIS_CIKIS" and islem == "SATIS":
+            total_out += adet
+            net = -adet
+
         else:
-            if islem == "SATIS":
-                total_out += adet
-                net = -adet
+            continue  # PORTFOY_ICI veya boş ise cashflow sayma
 
         if pd.notna(tarih):
             if tarih.date() == today:
@@ -542,6 +549,7 @@ def main():
                     + [x + " (Hisse)" for x in watchlist]
                 )
                 f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
+                f_kaynak = st.selectbox("Kaynak", ["PORTFOY_ICI", "DIS_GIRIS", "DIS_CIKIS"])
                 f_adet = st.number_input("Adet", 0.0, step=0.01)
 
                 # Son fiyat önerisi + default fiyat
@@ -574,6 +582,7 @@ def main():
                                 f_islem,
                                 str(f_adet).replace(".", ","),
                                 str(f_fiyat).replace(".", ","),
+                                f_kaynak
                             ],
                             value_input_option='USER_ENTERED'
                         )
