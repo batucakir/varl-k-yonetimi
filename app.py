@@ -451,9 +451,15 @@ def main():
                 c1, c2, c3 = st.columns(3)
                 c4, c5, c6 = st.columns(3)
                 
-                c4.metric("Toplam Realized", f"{format_tr_money(total_realized / rate)} {curr}")
-                c5.metric("Bu Ay Realized", f"{format_tr_money(month_realized / rate)} {curr}")
-                c6.metric("Bugün Realized", f"{format_tr_money(today_realized / rate)} {curr}")
+                def pretty_metric(value, currency):
+                    if abs(value) < 0.01:
+                        return "0"
+                    return f"{format_tr_money(value)} {currency}"
+                
+                c4.metric("Toplam Realized", pretty_metric(total_realized / rate, curr))
+                c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
+                c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
+                
 
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
                 c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
