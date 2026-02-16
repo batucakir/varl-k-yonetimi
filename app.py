@@ -555,6 +555,8 @@ def main():
     if page == "Portföyüm":
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
         total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
+        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
+
         tabs = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
 
         for i, (tab, curr, rate) in enumerate(zip(tabs, ["TL", "$", "€"], [1.0, usd if usd > 0 else 1.0, eur if eur > 0 else 1.0])):
@@ -962,6 +964,13 @@ def main():
                 else:
                     st.error("Bu sembolün fiyat kolonu bulunamadı.")
 
+                st.subheader("💸 Dış Nakit Akışı (Cashflow)")
+                
+                k1, k2, k3 = st.columns(3)
+                
+                k1.metric("Toplam Para Girişi", pretty_metric(total_in / rate, curr))
+                k2.metric("Toplam Para Çıkışı", pretty_metric(total_out / rate, curr))
+                k3.metric("Bu Ay Net Cashflow", pretty_metric(month_net_cf / rate, curr))
 
 
 if __name__ == "__main__":
