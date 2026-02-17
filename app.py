@@ -17,7 +17,7 @@ except ImportError:
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Varlık Paneli", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
-
+SNAPSHOT_SHEET_NAME = "Snapshot"
 # --- ÖZEL CSS ---
 st.markdown("""
 <style>
@@ -77,6 +77,28 @@ def get_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
     return gspread.authorize(creds)
+    
+def ensure_snapshot_sheet(sheet):
+    """
+    Snapshot sheet yoksa oluşturur ve header yazar.
+    """
+    try:
+        ws = sheet.worksheet(SNAPSHOT_SHEET_NAME)
+        return ws
+    except:
+        ws = sheet.add_worksheet(title=SNAPSHOT_SHEET_NAME, rows="1000", cols="20")
+        ws.append_row([
+            "Tarih",
+            "ToplamServetTL",
+            "NetYatirimTL",
+            "PerformansTL",
+            "ALTIN_pct",
+            "FON_pct",
+            "NAKIT_pct",
+            "HISSE_pct",
+            "DOVIZ_pct",
+        ], value_input_option="USER_ENTERED")
+        return ws
 
 @st.cache_data(ttl=60)
 def load_data():
@@ -390,6 +412,60 @@ def external_cashflow_table(df_trans, limit=50):
     out = out.rename(columns={"Kaynak_u": "Kaynak", "Islem_u": "İşlem"})
     return out.head(limit)
 
+def save_snapshot(df_view, tot_w, net_invested, performance):
+    """
+    Günün özetini Snapshot sheet'ine yazar (TL baz).
+    """
+    try:
+        client = get_client()
+        sh = client.open(SHEET_NAME)
+        ws = ensure_snapshot_sheet(sh)
+
+        # Grup yüzdeleri
+        group_sum = {}
+        if df_view is not None and not df_view.empty:
+            group_sum = df_view.groupby("Grup")["Net Değer"].sum().to_dict()
+
+        total = float(tot_w or 0.0)
+        def pct(group_name):
+            v = float(group_sum.get(group_name, 0.0) or 0.0)
+            return (v / total * 100) if total > 0 else 0.0
+
+        row = [
+            datetime.now().strftime("%d.%m.%Y %H:%M"),
+            float(tot_w or 0.0),
+            float(net_invested or 0.0),
+            float(performance or 0.0),
+            pct("ALTIN"),
+            pct("FON"),
+            pct("NAKİT"),
+            pct("HİSSE"),
+            pct("DÖVİZ"),
+        ]
+
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        return True
+    except:
+        return False
+        
+def load_snapshots():
+    try:
+        client = get_client()
+        sh = client.open(SHEET_NAME)
+        ws = sh.worksheet(SNAPSHOT_SHEET_NAME)
+        data = ws.get_all_values()
+        if len(data) <= 1:
+            return pd.DataFrame()
+        df = pd.DataFrame(data[1:], columns=data[0])
+        df["Tarih"] = pd.to_datetime(df["Tarih"], dayfirst=True, errors="coerce")
+        for c in df.columns:
+            if c != "Tarih":
+                df[c] = df[c].apply(clean_numeric)
+        df = df.dropna(subset=["Tarih"]).sort_values("Tarih")
+        return df
+    except:
+        return pd.DataFrame()
+
 # --- AYLIK REALIZED ÖZET ---
 def realized_monthly_summary(df_trans):
     if df_trans.empty:
@@ -654,6 +730,30 @@ def main():
         total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
         net_invested = total_in - total_out          # dışarıdan net koyduğun para (TL baz)
         performance = tot_w - net_invested           # toplam servetten net yatırımı çıkar
+
+        st.divider()
+        b1, b2 = st.columns([1, 3])
+        with b1:
+            if st.button("📌 Snapshot Kaydet (TL)", use_container_width=True):
+                ok = save_snapshot(df_view, tot_w, net_invested, performance)
+                if ok:
+                    st.success("Snapshot kaydedildi ✅")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error("Snapshot kaydedilemedi (Sheet/izin kontrol et) ❌")
+        with b2:
+            st.caption("Snapshot: Toplam Servet, Net Yatırım, Performans ve grup yüzdelerini 'Snapshot' sheet'ine yazar.")
+            
+        df_snap = load_snapshots()
+        
+        if not df_snap.empty:
+            st.subheader("🗂️ Snapshot Geçmişi")
+            fig_s = px.line(df_snap, x="Tarih", y=["ToplamServetTL", "PerformansTL"])
+            fig_s.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_s, use_container_width=True)
+        else:
+            st.caption("Henüz snapshot yok. Snapshot Kaydet butonuna basınca oluşacak.")
 
         df_cf = external_cashflow_table(df_trans, limit=30)
 
