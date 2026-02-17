@@ -896,17 +896,51 @@ def main():
                     else:
                         st.info("Henüz görüntülenecek varlık yok.")
 
-                st.subheader("📋 Detaylı Varlık Listesi")
-                if not df_view.empty:
-                    df_show = df_view.copy()
-                    for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi"]:
-                        df_show[c] = df_show[c] / rate
-                    df_show["Kâr %"] = (df_show["Net Kâr"] / df_show["Maliyet"]) * 100
-                    st.dataframe(
-                        df_show.style.format({"Net Değer": "{:,.2f}", "Kâr %": "%{:,.2f}"}),
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                    st.subheader("📋 Detaylı Varlık Listesi")
+                    
+                    if not df_view.empty:
+                        df_show = df_view.copy()
+                    
+                        # 🔹 Ortalama Maliyet (Birim)
+                        df_show["Ortalama Maliyet"] = df_show["Maliyet"] / df_show["Adet"]
+                    
+                        # 🔹 Brüt Değer (Vergisiz)
+                        df_show["Brüt Değer"] = df_show["Adet"] * df_show["Fiyat"]
+                    
+                        # Döviz dönüşümü
+                        for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi", 
+                                  "Ortalama Maliyet", "Brüt Değer"]:
+                            df_show[c] = df_show[c] / rate
+                    
+                        # Kâr %
+                        df_show["Kâr %"] = (df_show["Net Kâr"] / df_show["Maliyet"]) * 100
+                    
+                        # Kolon sıralamasını profesyonel yapalım
+                        df_show = df_show[
+                            ["Grup", "Varlık", "Adet",
+                             "Ortalama Maliyet", "Fiyat",
+                             "Maliyet", "Brüt Değer",
+                             "Vergi", "Net Değer",
+                             "Net Kâr", "Kâr %"]
+                        ]
+                    
+                        st.dataframe(
+                            df_show.style.format({
+                                "Ortalama Maliyet": "{:,.2f}",
+                                "Fiyat": "{:,.2f}",
+                                "Maliyet": "{:,.2f}",
+                                "Brüt Değer": "{:,.2f}",
+                                "Vergi": "{:,.2f}",
+                                "Net Değer": "{:,.2f}",
+                                "Net Kâr": "{:,.2f}",
+                                "Kâr %": "%{:,.2f}"
+                            }),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("Henüz işlem/varlık yok.")
+
                 else:
                     st.info("Henüz işlem/varlık yok.")
 
