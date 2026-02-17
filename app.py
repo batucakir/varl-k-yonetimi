@@ -210,7 +210,12 @@ def calculate_portfolio(df_trans, df_prices):
 
         vergi = 0.0
         if "FON" in str(d["tur"]).upper() and val > d["maliyet"]:
-            vergi = (val - d["maliyet"]) * FON_VERGI_ORANI
+            # PHE fonu stopaj yoksa vergi alma
+            if "PHE" in str(v).upper():
+                vergi = 0.0
+            else:
+                vergi = (val - d["maliyet"]) * FON_VERGI_ORANI
+
 
         nd = val - vergi
 
