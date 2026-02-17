@@ -773,8 +773,6 @@ def main():
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
                 p1, p2 = st.columns(2)
-                p1.metric("Net Yatırım (Dış Net)", pretty_metric(net_invested / rate, curr))
-                p2.metric("Performans (Toplam - Net Yatırım)", pretty_metric(performance / rate, curr))
 
                 # --- TL Bakiye (portföy içi nakit) ---
                 tl_row = df_view[df_view["Varlık"].str.upper().str.contains("TL BAKIYE", na=False)]
@@ -782,8 +780,6 @@ def main():
                 
                 n1, n2 = st.columns(2)
                 n1.metric("Portföy İçi Nakit (TL Bakiye)", pretty_metric(tl_balance / rate, curr))
-                n2.metric("Alım Gücü (≈)", pretty_metric(tl_balance / rate, curr))
-
 
                 st.subheader("💸 Dış Nakit Akışı (Cashflow)")
                 
