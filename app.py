@@ -800,6 +800,19 @@ def main():
                     )
                 
                 st.divider()
+                                # --- HEDEF MOTORU ---
+                days_left = max((HEDEF_TARIH - datetime.now()).days, 0)
+                months_left = max(int(np.ceil(days_left / 30.44)), 1)
+                
+                remain_tl = HEDEF_SERVET_TL - tot_w
+                required_monthly_net = (remain_tl / months_left) if remain_tl > 0 else 0.0
+                
+                g1, g2, g3 = st.columns(3)
+                g1.metric("Kalan Süre", f"{months_left} ay", f"{days_left} gün")
+                g2.metric("Kalan Tutar", pretty_metric(remain_tl, "TL"))
+                g3.metric("Gerekli Aylık Net Yatırım", pretty_metric(required_monthly_net, "TL"))
+                
+                st.caption("Bu metrikler TL bazlıdır. 'Net yatırım' sadece DIS_GIRIS / DIS_CIKIS kaydından gelir.")
 
 
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
