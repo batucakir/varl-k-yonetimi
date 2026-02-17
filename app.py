@@ -748,7 +748,7 @@ def main():
                 else:
                     st.error("Snapshot kaydedilemedi (Sheet/izin kontrol et) ❌")
         with b2:
-            st.caption("Snapshot: Toplam Servet, Net Yatırım, Performans ve grup yüzdelerini 'Snapshot' sheet'ine yazar.")
+            st.caption("")
             
         df_snap = load_snapshots()
         
@@ -775,7 +775,6 @@ def main():
                 p1, p2 = st.columns(2)
                 p1.metric("Net Yatırım (Dış Net)", pretty_metric(net_invested / rate, curr))
                 p2.metric("Performans (Toplam - Net Yatırım)", pretty_metric(performance / rate, curr))
-                st.caption("Not: Net Yatırım sadece Kaynak=DIS_GIRIS / DIS_CIKIS ile hesaplanır. PORTFOY_ICI sayılmaz.")
 
                 # --- TL Bakiye (portföy içi nakit) ---
                 tl_row = df_view[df_view["Varlık"].str.upper().str.contains("TL BAKIYE", na=False)]
