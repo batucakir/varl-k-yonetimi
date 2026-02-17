@@ -302,7 +302,6 @@ def calculate_external_cashflows(df_trans):
     PORTFOY_ICI hareketler (altın satıp TL’ye geçmek gibi) cashflow sayılmaz.
     """
     if df_trans.empty:
-        if "Kaynak" not in df_trans.columns:
         return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
 
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
