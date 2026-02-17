@@ -210,7 +210,7 @@ def calculate_portfolio(df_trans, df_prices):
 # --- REALIZED P&L HESAPLAMA ---
 def calculate_realized_pnl(df_trans):
     if df_trans.empty:
-    return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0
 
     df_trans = df_trans.sort_values("Tarih").copy()
 
