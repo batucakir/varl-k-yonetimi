@@ -651,7 +651,7 @@ def main():
     if page == "Portföyüm":
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
         total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
-        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans),
+        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
         net_invested = total_in - total_out          # dışarıdan net koyduğun para (TL baz)
         performance = tot_w - net_invested           # toplam servetten net yatırımı çıkar
 
