@@ -926,12 +926,12 @@ def main():
                     st.dataframe(
                         df_show.style.format({
                             "Fiyat": "{:,.2f}",
-                            "Ortalama Maliyet": "{:,.2f}",
-                            "Maliyet": "{:,.2f}",
-                            "Brüt Değer": "{:,.2f}",
-                            "Net Değer": "{:,.2f}",
-                            "Net Kâr": "{:,.2f}",
-                            "Vergi": "{:,.2f}",
+                            "Ortalama Maliyet": "{:,.4f}",
+                            "Maliyet": "{:,.4f}",
+                            "Brüt Değer": "{:,.4f}",
+                            "Net Değer": "{:,.4f}",
+                            "Net Kâr": "{:,.4f}",
+                            "Vergi": "{:,.4f}",
                             "Kâr %": "%{:,.2f}",
                         }),
                         use_container_width=True,
