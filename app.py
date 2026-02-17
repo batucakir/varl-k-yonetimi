@@ -941,9 +941,6 @@ def main():
                     else:
                         st.info("Henüz işlem/varlık yok.")
 
-                else:
-                    st.info("Henüz işlem/varlık yok.")
-
                 if curr == "TL":
                     st.divider()
                     st.subheader("🥇 Kıymetli Metal Alım-Satım Farkları")
