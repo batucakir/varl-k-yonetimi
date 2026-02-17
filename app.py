@@ -901,46 +901,47 @@ def main():
                     if not df_view.empty:
                         df_show = df_view.copy()
                     
-                        # 🔹 Ortalama Maliyet (Birim)
-                        df_show["Ortalama Maliyet"] = df_show["Maliyet"] / df_show["Adet"]
+                        # ✅ Yeni kolonlar (TL bazında hesapla)
+                        # Ortalama maliyet: maliyet / adet  (adet 0 ise 0)
+                        df_show["Ortalama Maliyet"] = np.where(
+                            df_show["Adet"] > 0,
+                            df_show["Maliyet"] / df_show["Adet"],
+                            0.0
+                        )
                     
-                        # 🔹 Brüt Değer (Vergisiz)
+                        # Brüt değer: adet * fiyat (vergisiz)
                         df_show["Brüt Değer"] = df_show["Adet"] * df_show["Fiyat"]
                     
-                        # Döviz dönüşümü
-                        for c in ["Fiyat", "Maliyet", "Net Değer", "Net Kâr", "Vergi", 
-                                  "Ortalama Maliyet", "Brüt Değer"]:
+                        # ✅ Kur dönüşümü (gösterim için)
+                        for c in ["Fiyat", "Maliyet", "Brüt Değer", "Net Değer", "Net Kâr", "Vergi", "Ortalama Maliyet"]:
                             df_show[c] = df_show[c] / rate
                     
-                        # Kâr %
-                        df_show["Kâr %"] = (df_show["Net Kâr"] / df_show["Maliyet"]) * 100
-                    
-                        # Kolon sıralamasını profesyonel yapalım
-                        df_show = df_show[
-                            ["Grup", "Varlık", "Adet",
-                             "Ortalama Maliyet", "Fiyat",
-                             "Maliyet", "Brüt Değer",
-                             "Vergi", "Net Değer",
-                             "Net Kâr", "Kâr %"]
-                        ]
+                        # ✅ Kâr % (maliyet 0 ise 0 yaz)
+                        df_show["Kâr %"] = np.where(
+                            df_show["Maliyet"] > 0,
+                            (df_show["Net Kâr"] / df_show["Maliyet"]) * 100,
+                            0.0
+                        )
                     
                         st.dataframe(
                             df_show.style.format({
-                                "Ortalama Maliyet": "{:,.2f}",
                                 "Fiyat": "{:,.2f}",
+                                "Ortalama Maliyet": "{:,.2f}",
                                 "Maliyet": "{:,.2f}",
                                 "Brüt Değer": "{:,.2f}",
-                                "Vergi": "{:,.2f}",
                                 "Net Değer": "{:,.2f}",
                                 "Net Kâr": "{:,.2f}",
-                                "Kâr %": "%{:,.2f}"
+                                "Vergi": "{:,.2f}",
+                                "Kâr %": "%{:,.2f}",
                             }),
                             use_container_width=True,
                             hide_index=True
                         )
                     else:
                         st.info("Henüz işlem/varlık yok.")
-
+                    
+                    if curr == "TL":
+                        st.divider()
 
                 if curr == "TL":
                     st.divider()
