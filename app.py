@@ -772,6 +772,15 @@ def main():
                 p2.metric("Performans (Toplam - Net Yatırım)", pretty_metric(performance / rate, curr))
                 st.caption("Not: Net Yatırım sadece Kaynak=DIS_GIRIS / DIS_CIKIS ile hesaplanır. PORTFOY_ICI sayılmaz.")
 
+                # --- TL Bakiye (portföy içi nakit) ---
+                tl_row = df_view[df_view["Varlık"].str.upper().str.contains("TL BAKIYE", na=False)]
+                tl_balance = float(tl_row["Net Değer"].sum()) if not tl_row.empty else 0.0
+                
+                n1, n2 = st.columns(2)
+                n1.metric("Portföy İçi Nakit (TL Bakiye)", pretty_metric(tl_balance / rate, curr))
+                n2.metric("Alım Gücü (≈)", pretty_metric(tl_balance / rate, curr))
+
+
                 st.subheader("💸 Dış Nakit Akışı (Cashflow)")
                 
                 k1, k2, k3, k4 = st.columns(4)
