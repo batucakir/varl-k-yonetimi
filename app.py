@@ -302,6 +302,7 @@ def calculate_external_cashflows(df_trans):
     PORTFOY_ICI hareketler (altın satıp TL’ye geçmek gibi) cashflow sayılmaz.
     """
     if df_trans.empty:
+        if "Kaynak" not in df_trans.columns:
         return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
 
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
@@ -651,7 +652,10 @@ def main():
     if page == "Portföyüm":
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
         total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
-        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
+        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans),
+        net_invested = total_in - total_out          # dışarıdan net koyduğun para (TL baz)
+        performance = tot_w - net_invested           # toplam servetten net yatırımı çıkar
+
         df_cf = external_cashflow_table(df_trans, limit=30)
 
         tabs = st.tabs(["🇹🇷 TL Görünüm", "🇺🇸 USD Görünüm", "🇪🇺 EUR Görünüm"])
@@ -664,7 +668,11 @@ def main():
                 c4.metric("Toplam Realized", pretty_metric(total_realized / rate, curr))
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
-                
+                p1, p2 = st.columns(2)
+                p1.metric("Net Yatırım (Dış Net)", pretty_metric(net_invested / rate, curr))
+                p2.metric("Performans (Toplam - Net Yatırım)", pretty_metric(performance / rate, curr))
+                st.caption("Not: Net Yatırım sadece Kaynak=DIS_GIRIS / DIS_CIKIS ile hesaplanır. PORTFOY_ICI sayılmaz.")
+
                 st.subheader("💸 Dış Nakit Akışı (Cashflow)")
                 
                 k1, k2, k3, k4 = st.columns(4)
