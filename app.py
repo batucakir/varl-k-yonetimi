@@ -662,34 +662,113 @@ def prepare_historical_trend(df_prices, df_trans, rate=1.0):
 
 # --- REBALANS ASİSTANI ---
 def render_rebalance_assistant(df_view):
+    if df_view is None or df_view.empty:
+        st.info("Rebalans analizi için portföy verisi bulunamadı.")
+        return
+
     st.subheader("⚖️ Portföy Rebalans Asistanı")
+
+    # Gruplara göre mevcut dağılım
     df_grp = df_view.groupby("Grup")["Net Değer"].sum().reset_index()
-    total_val = df_grp["Net Değer"].sum()
-    cols = st.columns(len(df_grp)) if len(df_grp) > 0 else []
+    total_val = float(df_grp["Net Değer"].sum() or 0.0)
+    if total_val <= 0:
+        st.info("Toplam portföy değeri 0 görünüyor, rebalans hesaplanamıyor.")
+        return
 
+    # 1) Default hedefler
+    # ALTIN %30, FON %55, NAKİT %8, geri kalan HİSSE
+    base_targets = {
+        "ALTIN": 30.0,
+        "FON": 55.0,
+        "NAKİT": 8.0,
+    }
+    remaining = max(0.0, 100.0 - sum(base_targets.values()))
+    base_targets["HİSSE"] = remaining   # kalan hisse
+
+    # 2) Kullanıcıya hedef oranları düzenleteceğimiz alan
+    st.markdown("**🎯 Hedef Dağılım (düzenlenebilir)**")
+    cols = st.columns(len(df_grp))
     target_ratios = {}
-    for i, row in df_grp.iterrows():
-        target_ratios[row["Grup"]] = cols[i].number_input(
-            f"Hedef % ({row['Grup']})",
-            0, 100, int(100 / len(df_grp)) if len(df_grp) > 0 else 0,
-            key=f"reb_val_{i}"
-        )
 
-    analysis = []
+    for col, (_, row) in zip(cols, df_grp.iterrows()):
+        g = str(row["Grup"])
+        default_ratio = base_targets.get(g, 0.0)
+        with col:
+            target_ratios[g] = st.number_input(
+                f"{g} hedef %",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(default_ratio),
+                step=1.0,
+                key=f"reb_target_{g}"
+            )
+
+    # Hedeflerin toplamını göster
+    total_target = sum(target_ratios.values())
+    if abs(total_target - 100.0) > 0.01:
+        st.warning(f"Hedef yüzdelerin toplamı: **%{total_target:.1f}** (ideal: %100)")
+    else:
+        st.caption("✅ Hedef yüzdelerin toplamı %100")
+
+    # 3) Her grup için detaylı analiz
+    analysis_rows = []
+    total_deviation_tl = 0.0
+
     for _, row in df_grp.iterrows():
-        fark = ((total_val * target_ratios[row["Grup"]]) / 100) - row["Net Değer"]
-        aks = (
-            f"✅ {format_tr_money(fark)} TL AL" if fark > 1000
-            else f"🚨 {format_tr_money(abs(fark))} TL SAT" if fark < -1000
-            else "🆗 Dengeli"
-        )
-        analysis.append({
-            "Grup": row["Grup"],
-            "Mevcut Değer": row["Net Değer"],
-            "Mevcut Oran": f"%{(row['Net Değer'] / total_val * 100):.1f}" if total_val > 0 else "%0.0",
-            "Hedef Oran": f"%{target_ratios[row['Grup']]:.1f}",
-            "Aksiyon": aks
+        g = str(row["Grup"])
+        current_val = float(row["Net Değer"] or 0.0)
+        current_pct = (current_val / total_val * 100.0) if total_val > 0 else 0.0
+
+        target_pct = float(target_ratios.get(g, 0.0))
+        target_val = total_val * target_pct / 100.0
+
+        diff_tl = target_val - current_val      # + ise AL, - ise SAT
+        diff_pct = target_pct - current_pct
+
+        total_deviation_tl += abs(diff_tl)
+
+        if diff_tl > 1000:
+            action = f"✅ {format_tr_money(diff_tl)} TL **AL**"
+        elif diff_tl < -1000:
+            action = f"🚨 {format_tr_money(abs(diff_tl))} TL **SAT**"
+        else:
+            action = "🆗 Dengeli"
+
+        analysis_rows.append({
+            "Grup": g,
+            "Mevcut Değer (TL)": current_val,
+            "Mevcut Oran %": current_pct,
+            "Hedef Değer (TL)": target_val,
+            "Hedef Oran %": target_pct,
+            "Fark (TL)": diff_tl,
+            "Fark %": diff_pct,
+            "Öneri": action
         })
+
+    # 4) Özet metrik
+    avg_deviation_pct = (total_deviation_tl / 2.0) / total_val * 100.0  # kabaca toplam sapma
+    st.metric(
+        "Toplam Sapma (yaklaşık)",
+        f"%{avg_deviation_pct:.1f}",
+        help="Gruplar arasındaki toplam hedeften sapmayı gösteren yaklaşık değer"
+    )
+
+    # 5) Tabloyu göster
+    df_analysis = pd.DataFrame(analysis_rows)
+
+    st.dataframe(
+        df_analysis.style.format({
+            "Mevcut Değer (TL)": "{:,.2f}",
+            "Hedef Değer (TL)": "{:,.2f}",
+            "Fark (TL)": "{:,.2f}",
+            "Mevcut Oran %": "{:,.1f}",
+            "Hedef Oran %": "{:,.1f}",
+            "Fark %": "{:,.1f}",
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+
 
     st.dataframe(pd.DataFrame(analysis), use_container_width=True, hide_index=True)
 
