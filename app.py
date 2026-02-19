@@ -378,11 +378,8 @@ def calculate_realized_pnl(df_trans):
     )
 
     # "Bugün realized" = son işlem günündeki realized toplamı
-    if realized_per_day:
-        last_day = max(realized_per_day.keys())
-        today_realized = realized_per_day.get(last_day, 0.0)
-    else:
-        today_realized = 0.0
+    # Bugün realized: sadece bugünün takvim tarihi
+    today_realized = realized_per_day.get(today, 0.0)
 
     return total_realized, month_realized, today_realized
 
