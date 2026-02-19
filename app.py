@@ -333,7 +333,7 @@ def calculate_realized_pnl(df_trans):
             continue
 
         # Nakit ve TL Bakiye realized hesabına girmez
-        if v == "TL BAKIYE" or tur in ["NAKİT", "NAKIT"]:
+        if v == "TL BAKIYE":
             continue
 
         # Pozisyon objesi hazır değilse yarat
