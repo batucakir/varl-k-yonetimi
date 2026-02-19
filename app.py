@@ -370,14 +370,17 @@ def calculate_realized_pnl(df_trans):
 
     df_sales = pd.DataFrame(rows)
 
-    # Günlere göre realized toplamlari
+    # Gun kolonunu datetime'e çevir -> DatetimeIndex kullanabilelim
+    df_sales["Gun"] = pd.to_datetime(df_sales["Gun"])
+
+    # Günlere göre realized toplamları
     per_day = df_sales.groupby("Gun")["Realized"].sum()
 
     # Tüm zamanlar toplam realized
     total_realized = float(per_day.sum())
 
     # SON realized günü (gerçekten realized olan son gün!)
-    last_day = per_day.index.max()
+    last_day = per_day.index.max()   # Timestamp
 
     # Son realized gününün olduğu ayın toplam realized'ı
     month_mask = (per_day.index.year == last_day.year) & (per_day.index.month == last_day.month)
@@ -387,7 +390,6 @@ def calculate_realized_pnl(df_trans):
     today_realized = float(per_day.loc[last_day])
 
     return total_realized, month_realized, today_realized
-
 
 def calculate_external_cashflows(df_trans):
     """
