@@ -257,6 +257,39 @@ def _canon_asset_name(v: str) -> str:
 
     return s
 
+def _canon_asset_name(v: str) -> str:
+    """
+    Aynı varlığın farklı yazımlarını tek anahtara indirger.
+    Örn:
+      'ASELS.IS (Hisse)' -> 'ASELS.IS'
+      'ASELS HISSE'      -> 'ASELS'
+      'TLY FONU'         -> 'TLY'
+      'TL Bakiye'        -> 'TL BAKIYE'
+    """
+    s = str(v or "").strip().upper()
+
+    s = s.replace("(HİSSE)", "").replace("(HISSE)", "")
+    s = s.replace(" HİSSE", "").replace(" HISSE", "")
+    s = s.replace(" FONU", "").replace(" FON", "")
+    s = s.strip()
+
+    if "TL" in s and "BAKIYE" in s:
+        return "TL BAKIYE"
+
+    return s
+
+
+def _normalize_islem(val: str) -> str:
+    """
+    İşlem tipini normalize eder:
+    'Satış', 'SATIŞ', 'satis' -> 'SATIS'
+    'Alış', 'ALIŞ', 'alis'    -> 'ALIS'
+    """
+    s = str(val or "").upper().strip()
+    # Türkçe 'Ş' harfini düz 'S' yap
+    s = s.replace("Ş", "S")
+    return s
+
 def _normalize_date(dt):
     """
     Tarih objesini güvenli şekilde sadece date() tipine indirger.
@@ -324,12 +357,12 @@ def calculate_realized_pnl(df_trans):
 
             # tarih -> date normalizasyonu
             try:
-                tarih_d = pd.Timestamp(tarih).date()
+                d = pd.Timestamp(tarih).date()
             except Exception:
-                tarih_d = None
+                d = None
 
-            if tarih_d is not None:
-                realized_per_day[tarih_d] = realized_per_day.get(tarih_d, 0.0) + realized
+            if d is not None:
+                realized_per_day[d] = realized_per_day.get(d, 0.0) + realized
 
             # pozisyonu azalt
             positions[v]["adet"] -= qty
@@ -344,7 +377,7 @@ def calculate_realized_pnl(df_trans):
         if d.month == this_month and d.year == this_year
     )
 
-    # Bugün realized: SON İŞLEM GÜNÜ
+    # "Bugün realized" = son işlem günündeki realized toplamı
     if realized_per_day:
         last_day = max(realized_per_day.keys())
         today_realized = realized_per_day.get(last_day, 0.0)
@@ -353,41 +386,6 @@ def calculate_realized_pnl(df_trans):
 
     return total_realized, month_realized, today_realized
 
-    for _, r in df.iterrows():
-        tur = str(r.get("Tür", "")).upper().strip()
-        varlik = str(r.get("Varlık", "")).upper().strip()
-        islem = str(r.get("İşlem", "")).upper().strip()
-        adet = float(r.get("Adet", 0) or 0)
-        tarih = r.get("Tarih")
-
-        # sadece TL Bakiye
-        if varlik != "TL BAKIYE":
-            continue
-
-        net = 0.0
-
-        # dış giriş
-        if tur in ["NAKİT_GİRİŞ", "NAKIT_GIRIS"]:
-            if islem == "ALIS":
-                total_in += adet
-                net = adet
-
-        # dış çıkış
-        elif tur in ["NAKİT_ÇIKIŞ", "NAKIT_CIKIS", "NAKİT_CIKIŞ"]:
-            if islem == "SATIS":
-                total_out += adet
-                net = -adet
-
-        else:
-            continue  # normal NAKİT trade hareketlerini saymıyoruz
-
-        if pd.notna(tarih):
-            if tarih.date() == today:
-                today_net += net
-            if tarih.month == this_month and tarih.year == this_year:
-                month_net += net
-
-    return total_in, total_out, month_net, today_net
 
 def calculate_external_cashflows(df_trans):
     """
