@@ -414,7 +414,7 @@ def calculate_realized_pnl(df_trans):
     # Tarihe göre sırala, NaN'leri at
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
 
-    positions = {}   # varlık -> {"adet":..., "maliyet":...}
+    positions = {}   
     rows = []        # her satış için: gün + realized
 
     for _, row in df.iterrows():
@@ -436,7 +436,6 @@ def calculate_realized_pnl(df_trans):
         if v == "TL BAKIYE":
             continue
 
-        # Pozisyon objesi hazır değilse yarat
         if v not in positions:
             positions[v] = {"adet": 0.0, "maliyet": 0.0}
 
@@ -447,7 +446,6 @@ def calculate_realized_pnl(df_trans):
         elif islem == "SATIS":
             held = positions[v]["adet"]
             if held <= 0:
-                # elde pozisyon yoksa bu satırı yok say
                 continue
 
             qty = min(adet, held)
@@ -470,23 +468,17 @@ def calculate_realized_pnl(df_trans):
 
     df_sales = pd.DataFrame(rows)
 
-    # Gun kolonunu datetime'e çevir -> DatetimeIndex kullanabilelim
     df_sales["Gun"] = pd.to_datetime(df_sales["Gun"])
 
-    # Günlere göre realized toplamları
     per_day = df_sales.groupby("Gun")["Realized"].sum()
 
-    # Tüm zamanlar toplam realized
     total_realized = float(per_day.sum())
 
-    # SON realized günü (gerçekten realized olan son gün!)
     last_day = per_day.index.max()   # Timestamp
 
-    # Son realized gününün olduğu ayın toplam realized'ı
     month_mask = (per_day.index.year == last_day.year) & (per_day.index.month == last_day.month)
     month_realized = float(per_day[month_mask].sum())
 
-    # “Bugün Realized” = son realized günü
     today_realized = float(per_day.loc[last_day])
 
     return total_realized, month_realized, today_realized
@@ -1107,7 +1099,12 @@ def main():
                 n1, n2 = st.columns(2)
                 n1.metric("Portföy İçi Nakit (TL Bakiye)", pretty_metric(tl_balance / rate, curr))
 
-                st.subheader("💸 Dış Nakit Akışı (Cashflow)")
+                # 💸 Dış nakit akışı kartı
+                st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='section-title'><span>💸</span>Dış Nakit Akışı (Cashflow)</div>",
+                    unsafe_allow_html=True
+                )
                 
                 k1, k2, k3, k4 = st.columns(4)
                 k1.metric("Toplam Giriş", pretty_metric(total_in / rate, curr))
@@ -1133,6 +1130,9 @@ def main():
                         use_container_width=True,
                         hide_index=True
                     )
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+
                 
                 c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
                 c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
@@ -1164,26 +1164,39 @@ def main():
                     )
                     st.plotly_chart(fig_t, use_container_width=True, key=f"trend_chart_{i}")
 
+                # 📊 Varlık dağılımı & kâr/zarar kartı
+                st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='section-title'><span>📊</span>Varlık Dağılımı & Kâr/Zarar</div>",
+                    unsafe_allow_html=True
+                )
+                
                 col1, col2 = st.columns(2)
+                
                 with col1:
-                    st.subheader("🍕 Varlık Dağılımı")
-                    view_mode = st.radio("Görünüm", ["Ana Gruplar", "Varlık Bazlı (Kırılımlı)"], horizontal=True, key=f"v_mode_{i}")
+                    st.markdown("#### 🍕 Varlık Dağılımı")
+                    view_mode = st.radio(
+                        "Görünüm",
+                        ["Ana Gruplar", "Varlık Bazlı (Kırılımlı)"],
+                        horizontal=True,
+                        key=f"v_mode_{i}"
+                    )
                     g_col = "Grup" if view_mode == "Ana Gruplar" else "Varlık"
-
+                
                     if not df_view.empty:
                         df_p = df_view.groupby(g_col)["Net Değer"].sum().reset_index()
                     else:
                         df_p = pd.DataFrame(columns=[g_col, "Net Değer"])
-
+                
                     # Ana gruplar sabit renk
                     c_map_group = {"ALTIN": "#FFD700", "FON": "#2ca02c", "NAKİT": "#1f77b4", "HİSSE": "#d62728", "DÖVİZ": "#9467bd"}
-
+                
                     if view_mode == "Ana Gruplar":
                         color_map = c_map_group
                     else:
                         items = df_p[g_col].astype(str).tolist()
                         fund_colors = ["#2ca02c","#3cb44b","#66c266","#8fd18f","#b6e3b6","#1f7a1f",]
-
+                
                         color_map = {}
                         fund_i = 0
                         for a in items:
@@ -1193,7 +1206,7 @@ def main():
                                 fund_i += 1
                             else:
                                 color_map[a] = asset_color(a)
-
+                
                     fig_p = px.pie(
                         df_p,
                         values="Net Değer",
@@ -1202,8 +1215,7 @@ def main():
                         color=g_col,
                         color_discrete_map=color_map
                     )
-
-                    # ✅ EKLEME: Eski versiyon gibi bold label + yüzde içeride
+                
                     fig_p.update_traces(
                         textposition="inside",
                         texttemplate="<b>%{label}</b><br><b>%{percent}</b>",
@@ -1214,24 +1226,33 @@ def main():
                         height=420,
                         margin=dict(l=10, r=10, t=10, b=10),
                     )
-
+                
                     st.plotly_chart(fig_p, use_container_width=True, key=f"pie_chart_{i}")
-
+                
                 with col2:
-                    st.subheader("📊 Kâr/Zarar Durumu")
+                    st.markdown("#### 📊 Kâr/Zarar Durumu")
                     if not df_view.empty:
-                        fig_b = go.Figure([go.Bar(
-                            name='Net Değer',
-                            x=df_view['Varlık'],
-                            y=df_view['Net Değer'] / rate,
-                            marker_color='forestgreen'
-                        )])
+                        fig_b = go.Figure([
+                            go.Bar(
+                                name='Net Değer',
+                                x=df_view['Varlık'],
+                                y=df_view['Net Değer'] / rate,
+                                marker_color='forestgreen'
+                            )
+                        ])
                         fig_b.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
                         st.plotly_chart(fig_b, use_container_width=True, key=f"bar_chart_{i}")
                     else:
                         st.info("Henüz görüntülenecek varlık yok.")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                st.subheader("📋 Detaylı Varlık Listesi")
+
+                st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='section-title'><span>📋</span>Detaylı Varlık Listesi</div>",
+                    unsafe_allow_html=True
+                )
                 
                 if not df_view.empty:
                     df_show = df_view.copy()
@@ -1273,8 +1294,8 @@ def main():
                     )
                 else:
                     st.info("Henüz işlem/varlık yok.")
-                
-                # ⬇️ BURADAN SONRASI ARTIK HER ZAMAN ÇALIŞACAK
+                    
+                st.markdown("</div>", unsafe_allow_html=True)
                 
                 st.divider()
                 st.subheader("🥇 Kıymetli Metal Alım-Satım Farkları")
