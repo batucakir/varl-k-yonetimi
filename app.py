@@ -407,7 +407,6 @@ def calculate_external_cashflows(df_trans):
     if "Kaynak" not in df.columns:
         df["Kaynak"] = ""
 
-    today = datetime.now().date()
     this_month = datetime.now().month
     this_year = datetime.now().year
 
@@ -445,6 +444,9 @@ def calculate_external_cashflows(df_trans):
                 today_net += net
             if tarih.month == this_month and tarih.year == this_year:
                 month_net += net
+                
+    today = df_trans["Tarih"].max().date()
+    today_realized = realized_per_day.get(today, 0.0)
 
     return total_in, total_out, month_net, today_net
     
