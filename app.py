@@ -324,7 +324,7 @@ def calculate_realized_pnl(df_trans):
                 if tarih_d == today:
                     today_realized += realized
 
-                if tarih.month == this_month and tarih.year == this_year:
+                if tarih_d is not None and tarih_d.month == this_month and tarih_d.year == this_year:
                     month_realized += realized
 
             # pozisyonu düş
