@@ -1081,7 +1081,6 @@ def main():
         net_invested = total_in - total_out          # dışarıdan net koyduğun para (TL baz)
         performance = tot_w - net_invested           # toplam servetten net yatırımı çıkar
 
-        st.divider()
         b1, b2 = st.columns([1, 3])
         with b1:
             if st.button("📌 Snapshot Kaydet (TL)", use_container_width=True):
