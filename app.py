@@ -445,8 +445,8 @@ def calculate_external_cashflows(df_trans):
             if tarih.month == this_month and tarih.year == this_year:
                 month_net += net
                 
-    today = df_trans["Tarih"].max().date()
-    today_realized = realized_per_day.get(today, 0.0)
+        today = df_trans["Tarih"].max().date()
+        today_realized = realized_per_day.get(today, 0.0)
 
     return total_in, total_out, month_net, today_net
     
