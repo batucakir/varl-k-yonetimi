@@ -257,6 +257,16 @@ def _canon_asset_name(v: str) -> str:
 
     return s
 
+def _normalize_date(dt):
+    """
+    Tarih objesini güvenli şekilde sadece date() tipine indirger.
+    """
+    if pd.isna(dt):
+        return None
+    try:
+        return pd.Timestamp(dt).date()
+    except:
+        return None
 
 def calculate_realized_pnl(df_trans):
     if df_trans is None or df_trans.empty:
@@ -310,8 +320,10 @@ def calculate_realized_pnl(df_trans):
             total_realized += realized
 
             if pd.notna(tarih):
-                if tarih.date() == today:
+                tarih_d = _normalize_date(tarih)
+                if tarih_d == today:
                     today_realized += realized
+
                 if tarih.month == this_month and tarih.year == this_year:
                     month_realized += realized
 
