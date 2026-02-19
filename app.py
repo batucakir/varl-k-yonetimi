@@ -971,7 +971,7 @@ def main():
                         df_p,
                         values="Net Değer",
                         names=g_col,
-                        hole=0.45,
+                        hole=0.40,
                         color=g_col,
                         color_discrete_map=color_map
                     )
