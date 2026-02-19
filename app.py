@@ -368,20 +368,34 @@ def calculate_realized_pnl(df_trans):
             positions[v]["adet"] -= qty
             positions[v]["maliyet"] -= avg_cost * qty
 
-    # Toplam realized
+    # Toplam realized (tüm günlerin toplamı)
     total_realized = sum(realized_per_day.values())
 
-    # Bu ay realized (bugünün ayına göre)
-    month_realized = sum(
-        val for d, val in realized_per_day.items()
-        if d.month == this_month and d.year == this_year
-    )
+    # En son işlem günü
+    last_day = max(realized_per_day.keys()) if realized_per_day else None
 
-    # "Bugün realized" = son işlem günündeki realized toplamı
-    # Bugün realized: sadece bugünün takvim tarihi
-    today_realized = realized_per_day.get(today, 0.0)
+    # Bu ay realized: son işlem gününün içinde olduğu ay
+    if last_day is not None:
+        month_realized = sum(
+            val for d, val in realized_per_day.items()
+            if d.month == last_day.month and d.year == last_day.year
+        )
+    else:
+        month_realized = 0.0
+
+    # "Bugün" realized:
+    # 1) Eğer sunucu tarihine ait realized varsa onu göster
+    # 2) Yoksa en son işlem gününün realized'ini göster
+    today = datetime.now().date()
+    if today in realized_per_day:
+        today_realized = realized_per_day[today]
+    elif last_day is not None:
+        today_realized = realized_per_day[last_day]
+    else:
+        today_realized = 0.0
 
     return total_realized, month_realized, today_realized
+
 
 
 def calculate_external_cashflows(df_trans):
