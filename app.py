@@ -977,18 +977,18 @@ def main():
                 else:
                     st.info("Henüz işlem/varlık yok.")
                 
-                    st.divider()
-                    st.subheader("🥇 Kıymetli Metal Alım-Satım Farkları")
-                    gm = st.columns(4)
-                    for idx, (n, k) in enumerate([("Gram", "GRAM ALTIN"), ("Ata", "ATA ALTIN"), ("22 Ayar", "22 AYAR ALTIN"), ("Çeyrek", "ÇEYREK ALTIN")]):
-                        s = float(last.get(f"{k} SATIŞ", 0) or 0)
-                        a = float(last.get(f"{k} ALIŞ", 0) or 0)
-                        diff = s - a
-                        p_diff = (diff / s) * 100 if s > 0 else 0
-                        gm[idx].metric(n, f"{s:,.2f} ₺", f"Makas: {diff:,.2f} ₺ (%{p_diff:.2f})")
-                    st.divider()
-                    if not df_view.empty:
-                        render_rebalance_assistant(df_view)
+                st.divider()
+                st.subheader("🥇 Kıymetli Metal Alım-Satım Farkları")
+                gm = st.columns(4)
+                for idx, (n, k) in enumerate([("Gram", "GRAM ALTIN"), ("Ata", "ATA ALTIN"), ("22 Ayar", "22 AYAR ALTIN"), ("Çeyrek", "ÇEYREK ALTIN")]):
+                    s = float(last.get(f"{k} SATIŞ", 0) or 0)
+                    a = float(last.get(f"{k} ALIŞ", 0) or 0)
+                    diff = s - a
+                    p_diff = (diff / s) * 100 if s > 0 else 0
+                    gm[idx].metric(n, f"{s:,.2f} ₺", f"Makas: {diff:,.2f} ₺ (%{p_diff:.2f})")
+                st.divider()
+                if not df_view.empty:
+                    render_rebalance_assistant(df_view)
                 st.divider()
                         
                 st.subheader("🧾 Aylık Realized Özeti")
