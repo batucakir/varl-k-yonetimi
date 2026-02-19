@@ -269,26 +269,31 @@ def _normalize_date(dt):
         return None
 
 def calculate_realized_pnl(df_trans):
+    """
+    Portföy içi realized P&L:
+      - Nakit bacakları (TL Bakiye / NAKİT) hariç
+      - total_realized   : tüm zamanların toplamı
+      - month_realized   : içinde bulunulan ayın toplamı
+      - today_realized   : SON İŞLEM GÜNÜNÜN realized toplamı
+    """
     if df_trans is None or df_trans.empty:
         return 0.0, 0.0, 0.0
 
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
 
-    positions = {}  # varlık -> {"adet":..., "maliyet":...}
-    total_realized = 0.0
-    today_realized = 0.0
-    month_realized = 0.0
+    positions = {}          # varlık -> {"adet":..., "maliyet":...}
+    realized_per_day = {}   # tarih (date) -> realized TL
 
     today = datetime.now().date()
-    this_month = datetime.now().month
-    this_year = datetime.now().year
+    this_month = today.month
+    this_year = today.year
 
     for _, row in df.iterrows():
         raw_v = str(row.get("Varlık", "")).strip()
         v = _canon_asset_name(raw_v)
 
         tur = str(row.get("Tür", "")).upper().strip()
-        islem = str(row.get("İşlem", "")).upper().strip()
+        islem = _normalize_islem(row.get("İşlem", ""))
         adet = float(row.get("Adet", 0) or 0)
         fiyat = float(row.get("Fiyat", 0) or 0)
         tarih = row.get("Tarih")
@@ -296,7 +301,7 @@ def calculate_realized_pnl(df_trans):
         if not v or adet <= 0:
             continue
 
-        # ✅ Nakit bacaklarını realized hesabından çıkar
+        # Nakit ve TL Bakiye realized hesabına girmez
         if v == "TL BAKIYE" or tur in ["NAKİT", "NAKIT"]:
             continue
 
@@ -310,31 +315,43 @@ def calculate_realized_pnl(df_trans):
         elif islem == "SATIS":
             held = positions[v]["adet"]
             if held <= 0:
-                # elde yoksa realized yazma (isim uyuşmazlığı / eksik kayıt olabilir)
+                # elde pozisyon yoksa bu satırı yok say
                 continue
 
-            qty = min(adet, held)  # ✅ sadece eldeki kadarını kapat
+            qty = min(adet, held)
             avg_cost = positions[v]["maliyet"] / held if held > 0 else 0.0
             realized = (fiyat - avg_cost) * qty
 
-            total_realized += realized
+            # tarih -> date normalizasyonu
+            try:
+                tarih_d = pd.Timestamp(tarih).date()
+            except Exception:
+                tarih_d = None
 
-            if pd.notna(tarih):
-                tarih_d = _normalize_date(tarih)
-                if tarih_d == today:
-                    today_realized += realized
+            if tarih_d is not None:
+                realized_per_day[tarih_d] = realized_per_day.get(tarih_d, 0.0) + realized
 
-                if tarih_d is not None and tarih_d.month == this_month and tarih_d.year == this_year:
-                    month_realized += realized
-
-            # pozisyonu düş
+            # pozisyonu azalt
             positions[v]["adet"] -= qty
             positions[v]["maliyet"] -= avg_cost * qty
 
-            # adet > held ise (fazla satış) burada bilerek yok sayıyoruz.
+    # Toplam realized
+    total_realized = sum(realized_per_day.values())
+
+    # Bu ay realized (bugünün ayına göre)
+    month_realized = sum(
+        val for d, val in realized_per_day.items()
+        if d.month == this_month and d.year == this_year
+    )
+
+    # Bugün realized: SON İŞLEM GÜNÜ
+    if realized_per_day:
+        last_day = max(realized_per_day.keys())
+        today_realized = realized_per_day.get(last_day, 0.0)
+    else:
+        today_realized = 0.0
 
     return total_realized, month_realized, today_realized
-
 
     for _, r in df.iterrows():
         tur = str(r.get("Tür", "")).upper().strip()
