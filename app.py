@@ -233,6 +233,12 @@ def calculate_portfolio(df_trans, df_prices):
         tot_t += vergi
 
     return pd.DataFrame(rows), tot_w, tot_t
+    
+TZ_OFFSET = 3  # Türkiye: UTC+3
+
+def now_tr():
+    # Sunucu UTC ise yerel TR saati:
+    return datetime.utcnow() + timedelta(hours=TZ_OFFSET)
 
 # --- REALIZED P&L HESAPLAMA ---
 def _canon_asset_name(v: str) -> str:
@@ -730,7 +736,7 @@ def main():
         last_price_date = last.get("Tarih")
         st.markdown("📊 **Son Veri Tarihi**")
         if pd.notna(last_price_date):
-            st.caption(pd.to_datetime(last_price_date).strftime("%d.%m.%Y"))
+            st.caption(last_price_dt.strftime("%d.%m.%Y %H:%M:%S"))
         else:
             st.caption("-")
     
