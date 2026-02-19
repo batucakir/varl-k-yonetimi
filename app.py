@@ -1097,7 +1097,7 @@ def main():
         df_snap = load_snapshots()
         
         if not df_snap.empty:
-            st.subheader("🗂️ Snapshot Geçmişi")
+            st.subheader("Snapshot Geçmişi")
             fig_s = px.line(df_snap, x="Tarih", y=["ToplamServetTL", "PerformansTL"])
             fig_s.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_s, use_container_width=True)
@@ -1156,7 +1156,7 @@ def main():
                 # 💸 Dış nakit akışı kartı
                 st.markdown("<div class='section-card'>", unsafe_allow_html=True)
                 st.markdown(
-                    "<div class='section-title'><span>💸</span>Dış Nakit Akışı (Cashflow)</div>",
+                    "<div class='section-title'><span></span>Dış Nakit Akışı (Cashflow)</div>",
                     unsafe_allow_html=True
                 )
                 
