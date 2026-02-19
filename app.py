@@ -364,15 +364,18 @@ def calculate_realized_pnl(df_trans):
     if not realized_per_day:
         return 0.0, 0.0, 0.0
 
-    # En son işlem günü (sheet'teki en büyük tarih)
-    last_day = max(realized_per_day.keys())
-
+    # 1) Her günün realized toplamı değişmeden kalıyor
     total_realized = sum(realized_per_day.values())
+
+    # 2) "Bu Ay Realized" = bugünün içinde olduğu ay
+    today = datetime.now().date()
     month_realized = sum(
         val for d, val in realized_per_day.items()
-        if d.year == last_day.year and d.month == last_day.month
+        if d.year == today.year and d.month == today.month
     )
-    today_realized = realized_per_day[last_day]
+
+    # 3) "Bugün Realized" = sadece bugünkü tarih
+    today_realized = realized_per_day.get(today, 0.0)
 
     return total_realized, month_realized, today_realized
 
