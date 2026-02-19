@@ -724,6 +724,13 @@ def main():
     with st.sidebar:
         st.markdown("<h1 style='text-align: center; color: #4e8cff;'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
         last = df_prices.iloc[-1]
+        # 📊 Sheet'teki son fiyat tarihi
+        last_price_date = last.get("Tarih")
+        if pd.notna(last_price_date):
+            st.markdown("📊 **Son Veri Tarihi**")
+            st.caption(pd.to_datetime(last_price_date).strftime("%d.%m.%Y"))
+
+        
 
         usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
         eur = float(last.get("EURO KURU", 0.0) or 0.0)
