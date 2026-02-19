@@ -801,7 +801,7 @@ def render_rebalance_assistant(df_view):
 
     # 🎯 Default hedefler: ALTIN 30, FON 55, HİSSE 7, NAKİT 3, DİĞER otomatik
     default_targets = {
-        "ALTIN": 30.0,
+        "ALTIN": 35.0,
         "FON": 55.0,
         "HİSSE": 7.0,
         "NAKİT": 3.0,
