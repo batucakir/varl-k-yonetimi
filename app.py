@@ -694,6 +694,15 @@ def render_rebalance_assistant(df_view):
 
     st.dataframe(pd.DataFrame(analysis), use_container_width=True, hide_index=True)
 
+FON_GREEN_TONES = [
+    "#2ca02c",  # koyu
+    "#3cb44b",
+    "#66c266",
+    "#8fd18f",
+    "#b6e3b6",
+    "#1f7a1f"
+]
+
 # --- PASTA RENKLEME (Varlık bazlı) ---
 def asset_color(name: str) -> str:
     n = str(name).upper()
@@ -702,7 +711,8 @@ def asset_color(name: str) -> str:
         return "#FFD700"   # sarı
     # Fon
     if "FON" in n:
-        return "#2ca02c"   # yeşil
+        idx = abs(hash(n)) % len(FON_GREEN_TONES)
+        return FON_GREEN_TONES[idx]
     # Nakit
     if "TL BAKIYE" in n or "NAKİT" in n or "NAKIT" in n:
         return "#1f77b4"   # mavi
