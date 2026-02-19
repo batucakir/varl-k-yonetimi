@@ -21,12 +21,12 @@ SNAPSHOT_SHEET_NAME = "Snapshot"
 # --- ÖZEL CSS ---
 st.markdown("""
 <style>
-    [data-testid="stMetricValue"] { font-size: 26px; font-weight: bold; }
+    [data-testid="stMetricValue"] { font-size: 32px; font-weight: bold; }
     .currency-card {
         background-color: #262730; padding: 10px; border-radius: 10px;
         border: 1px solid #41444b; margin-bottom: 10px; text-align: center;
     }
-    .currency-value { font-size: 22px; font-weight: bold; color: #ffffff; }
+    .currency-value { font-size: 26px; font-weight: bold; color: #ffffff; }
     .rebalance-buy { color: #00FF00; font-weight: bold; }
     .rebalance-sell { color: #FF4B4B; font-weight: bold; }
 </style>
