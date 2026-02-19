@@ -940,36 +940,36 @@ def main():
         st.stop()
 
     with st.sidebar:
-            st.markdown("<h1 class='main-title'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
-        
-            last = df_prices.iloc[-1]
-            last_price_date = last.get("Tarih")
-        
-            if pd.notna(last_price_date):
-                st.markdown("<div class='sidebar-label'>📊 Son Veri Tarihi</div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div class='sidebar-caption'>{pd.to_datetime(last_price_date).strftime('%d.%m.%Y %H:%M:%S')}</div>",
-                    unsafe_allow_html=True
-                )
-        
-            # Uygulama zamanı
-            now_dt = datetime.now()
-            st.markdown("<div class='sidebar-label' style='margin-top:10px;'>🕒 Uygulama Zamanı</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='sidebar-caption'>{now_dt.strftime('%d.%m.%Y %H:%M:%S')}</div>",
-                unsafe_allow_html=True
-            )
-        
-            # USD / EUR kartları alttaki gibi kalabilir
-            usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
-            eur = float(last.get("EURO KURU", 0.0) or 0.0)
-        
-            st.markdown(
-                f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div>'
-                f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>',
-                unsafe_allow_html=True
-            )
+        st.markdown("<h1 class='main-title'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
+    
         last = df_prices.iloc[-1]
+        last_price_date = last.get("Tarih")
+    
+        if pd.notna(last_price_date):
+            st.markdown("<div class='sidebar-label'>📊 Son Veri Tarihi</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='sidebar-caption'>{pd.to_datetime(last_price_date).strftime('%d.%m.%Y %H:%M:%S')}</div>",
+                unsafe_allow_html=True
+            )
+    
+        # Uygulama zamanı
+        now_dt = datetime.now()
+        st.markdown("<div class='sidebar-label' style='margin-top:10px;'>🕒 Uygulama Zamanı</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='sidebar-caption'>{now_dt.strftime('%d.%m.%Y %H:%M:%S')}</div>",
+            unsafe_allow_html=True
+        )
+    
+        # USD / EUR kartları alttaki gibi kalabilir
+        usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
+        eur = float(last.get("EURO KURU", 0.0) or 0.0)
+    
+        st.markdown(
+            f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div>'
+            f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>',
+            unsafe_allow_html=True
+        )
+
     
         # 📊 Sheet'teki son fiyat tarihi (tarih + saat)
         last_price_date = last.get("Tarih")
