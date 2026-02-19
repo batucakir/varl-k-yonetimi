@@ -931,7 +931,7 @@ def main():
                         for a in items:
                             u = a.upper()
                             if "FON" in u:
-                                color_map[a] = fund_colors[fund i % len(fund_colors)]
+                                color_map[a] = fund_colors[fund_i % len(fund_colors)]
                                 fund_i += 1
                             else:
                                 color_map[a] = asset_color(a)
