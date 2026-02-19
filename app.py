@@ -940,64 +940,50 @@ def main():
         st.stop()
 
     with st.sidebar:
+        # Başlık
         st.markdown("<h1 class='main-title'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
     
+        # Son satır (fiyat verisi)
         last = df_prices.iloc[-1]
-        last_price_date = last.get("Tarih")
     
+        # 📊 Sheet'teki son fiyat tarihi (Tarih kolonu zaten TR saati)
+        last_price_date = last.get("Tarih")
         if pd.notna(last_price_date):
+            last_price_dt = pd.to_datetime(last_price_date)
             st.markdown("<div class='sidebar-label'>📊 Son Veri Tarihi</div>", unsafe_allow_html=True)
             st.markdown(
-                f"<div class='sidebar-caption'>{pd.to_datetime(last_price_date).strftime('%d.%m.%Y %H:%M:%S')}</div>",
+                f"<div class='sidebar-caption'>{last_price_dt.strftime('%d.%m.%Y %H:%M:%S')}</div>",
                 unsafe_allow_html=True
             )
     
-        # Uygulama zamanı
-        now_dt = datetime.now()
-        st.markdown("<div class='sidebar-label' style='margin-top:10px;'>🕒 Uygulama Zamanı</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='sidebar-caption'>{now_dt.strftime('%d.%m.%Y %H:%M:%S')}</div>",
-            unsafe_allow_html=True
-        )
-    
-        # USD / EUR kartları alttaki gibi kalabilir
-        usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
-        eur = float(last.get("EURO KURU", 0.0) or 0.0)
-    
-        st.markdown(
-            f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div>'
-            f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>',
-            unsafe_allow_html=True
-        )
-
-    
-        # 📊 Sheet'teki son fiyat tarihi (tarih + saat)
-        last_price_date = last.get("Tarih")
-        if pd.notna(last_price_date):
-            last_price_dt = pd.to_datetime(last_price_date)     # <-- BU SATIR ÖNEMLİ
-            st.markdown("📊 **Son Veri Tarihi**")
-            st.caption(last_price_dt.strftime("%d.%m.%Y %H:%M:%S"))
-    
-        # 🌐 Uygulama zamanı (TR saati, sunucu UTC ise +3 saat)
+        # 🌐 Uygulama zamanı (sunucu UTC → TR için +3 saat)
         app_now = datetime.utcnow() + timedelta(hours=3)
-        st.markdown("🌐 **Uygulama Zamanı (TR)**")
-        st.caption(app_now.strftime("%d.%m.%Y %H:%M:%S"))
+        st.markdown("<div class='sidebar-label' style='margin-top:10px;'>🕒 Uygulama Zamanı (TR)</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='sidebar-caption'>{app_now.strftime('%d.%m.%Y %H:%M:%S')}</div>",
+            unsafe_allow_html=True
+        )
     
+        # 💵 USD / EUR kartları (tek sefer)
         usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
         eur = float(last.get("EURO KURU", 0.0) or 0.0)
     
         st.markdown(
-            f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div>'
-            f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>',
+            f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div>'
+            f'<div class="currency-value">{usd:.2f} ₺</div></div>'
+            f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div>'
+            f'<div class="currency-value">{eur:.2f} ₺</div></div>',
             unsafe_allow_html=True
         )
     
+        # Menü
         page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
+    
         if st.button("🔄 Verileri Yenile", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-
-
+    
+        # ➕ İşlem Ekle
         with st.expander("➕ İşlem Ekle"):
             with st.form("add_trans"):
                 f_date = st.date_input("Tarih", datetime.now())
@@ -1010,24 +996,23 @@ def main():
                 f_islem = st.selectbox("İşlem", ["ALIS", "SATIS"])
                 f_kaynak = st.selectbox("Kaynak", ["PORTFOY_ICI", "DIS_GIRIS", "DIS_CIKIS"])
                 f_adet = st.number_input("Adet", 0.0, step=0.01)
-
-                # Son fiyat önerisi + default fiyat
+    
                 suggested_price = 0.0
                 try:
                     suggested_price = float(find_smart_price(last, f_varlik) or 0.0)
                 except:
                     suggested_price = 0.0
-
+    
                 if suggested_price > 0:
                     st.caption("Son fiyat önerisi: " + format_tr_money(suggested_price))
-
+    
                 f_fiyat = st.number_input(
                     "Fiyat",
                     0.0,
                     step=0.01,
                     value=float(suggested_price) if suggested_price > 0 else 0.0
                 )
-
+    
                 if st.form_submit_button("Kaydet"):
                     try:
                         client = get_client()
@@ -1051,7 +1036,8 @@ def main():
                         st.rerun()
                     except:
                         st.error("Hata!")
-
+    
+        # 🛠️ Takip Listesi
         with st.expander("🛠️ Takip Listesi"):
             ns = st.text_input("Hisse Sembolü (Örn: SASA.IS)")
             if st.button("Takibe Ekle", use_container_width=True):
@@ -1067,6 +1053,7 @@ def main():
                         st.rerun()
                 except:
                     pass
+    
 
     if page == "Portföyüm":
         df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
