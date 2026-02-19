@@ -694,7 +694,7 @@ def render_rebalance_assistant(df_view):
         "NAKİT": 3.0,
     }
 
-    st.markdown("**🎯 Hedef Dağılım (düzenlenebilir)**")
+    st.markdown("🎯 Hedef Dağılım")
 
     c1, c2, c3, c4 = st.columns(4)
     target_ratios = {}
@@ -725,7 +725,7 @@ def render_rebalance_assistant(df_view):
         )
     with c4:
         target_ratios["NAKİT"] = st.number_input(
-            "NAKİT hedef %",
+            "NAKİT Hedef %",
             min_value=0.0, max_value=100.0,
             value=float(default_targets["NAKİT"]),
             step=1.0,
@@ -747,9 +747,9 @@ def render_rebalance_assistant(df_view):
 
     total_target = sum(target_ratios.values())
     if abs(total_target - 100.0) > 0.01:
-        st.warning(f"Hedef yüzdelerin toplamı: **%{total_target:.1f}** (ideal: %100)")
+        st.warning(f"Hedef yüzdelerin toplamı: %{total_target:.1f}")
     else:
-        st.caption("✅ Hedef yüzdelerin toplamı %100")
+        st.caption("Hedef yüzdelerin toplamı %100")
 
     # Detay analiz satırları
     analysis_rows = []
@@ -761,9 +761,9 @@ def render_rebalance_assistant(df_view):
         diff_pct = target_pct - current_pct
 
         if diff_tl > 1000:
-            action = f"✅ {format_tr_money(diff_tl)} TL **AL**"
+            action = f"✅ {format_tr_money(diff_tl)} TL AL"
         elif diff_tl < -1000:
-            action = f"🚨 {format_tr_money(abs(diff_tl))} TL **SAT**"
+            action = f"🚨 {format_tr_money(abs(diff_tl))} TL SAT"
         else:
             action = "🆗 Dengeli"
 
