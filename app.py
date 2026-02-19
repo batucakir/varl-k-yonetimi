@@ -729,35 +729,34 @@ def main():
 
     with st.sidebar:
         st.markdown("<h1 style='text-align: center; color: #4e8cff;'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
-    
         last = df_prices.iloc[-1]
     
-        # 📊 Sheet'teki son fiyat tarihi
+        # 📊 Sheet'teki son fiyat tarihi (tarih + saat)
         last_price_date = last.get("Tarih")
-        st.markdown("📊 **Son Veri Tarihi**")
         if pd.notna(last_price_date):
+            last_price_dt = pd.to_datetime(last_price_date)     # <-- BU SATIR ÖNEMLİ
+            st.markdown("📊 **Son Veri Tarihi**")
             st.caption(last_price_dt.strftime("%d.%m.%Y %H:%M:%S"))
-        else:
-            st.caption("-")
     
-        # 🕒 Uygulama (şu anki) tarih-saat
-        now = datetime.now()
-        st.markdown("🕒 **Uygulama Zamanı**")
-        st.caption(now.strftime("%d.%m.%Y %H:%M:%S"))
-
+        # 🌐 Uygulama zamanı (TR saati, sunucu UTC ise +3 saat)
+        app_now = datetime.utcnow() + timedelta(hours=3)
+        st.markdown("🌐 **Uygulama Zamanı (TR)**")
+        st.caption(app_now.strftime("%d.%m.%Y %H:%M:%S"))
+    
         usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
         eur = float(last.get("EURO KURU", 0.0) or 0.0)
-
+    
         st.markdown(
             f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div>'
             f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>',
             unsafe_allow_html=True
         )
-
+    
         page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
         if st.button("🔄 Verileri Yenile", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+
 
         with st.expander("➕ İşlem Ekle"):
             with st.form("add_trans"):
