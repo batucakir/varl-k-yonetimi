@@ -21,12 +21,12 @@ SNAPSHOT_SHEET_NAME = "Snapshot"
 # --- ÖZEL CSS ---
 st.markdown("""
 <style>
-    [data-testid="stMetricValue"] { font-size: 32px; font-weight: bold; }
+    [data-testid="stMetricValue"] { font-size: 36px; font-weight: bold; }
     .currency-card {
         background-color: #262730; padding: 10px; border-radius: 10px;
         border: 1px solid #41444b; margin-bottom: 10px; text-align: center;
     }
-    .currency-value { font-size: 26px; font-weight: bold; color: #ffffff; }
+    .currency-value { font-size: 28px; font-weight: bold; color: #ffffff; }
     .rebalance-buy { color: #00FF00; font-weight: bold; }
     .rebalance-sell { color: #FF4B4B; font-weight: bold; }
 </style>
@@ -701,7 +701,7 @@ def render_rebalance_assistant(df_view):
 
     with c1:
         target_ratios["ALTIN"] = st.number_input(
-            "ALTIN hedef %",
+            "ALTIN Hedef %",
             min_value=0.0, max_value=100.0,
             value=float(default_targets["ALTIN"]),
             step=1.0,
@@ -709,7 +709,7 @@ def render_rebalance_assistant(df_view):
         )
     with c2:
         target_ratios["FON"] = st.number_input(
-            "FON hedef %",
+            "FON Hedef %",
             min_value=0.0, max_value=100.0,
             value=float(default_targets["FON"]),
             step=1.0,
@@ -717,7 +717,7 @@ def render_rebalance_assistant(df_view):
         )
     with c3:
         target_ratios["HİSSE"] = st.number_input(
-            "HİSSE hedef %",
+            "HİSSE Hedef %",
             min_value=0.0, max_value=100.0,
             value=float(default_targets["HİSSE"]),
             step=1.0,
