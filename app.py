@@ -21,16 +21,110 @@ SNAPSHOT_SHEET_NAME = "Snapshot"
 # --- ÖZEL CSS ---
 st.markdown("""
 <style>
-    [data-testid="stMetricValue"] { font-size: 36px; font-weight: bold; }
-    .currency-card {
-        background-color: #262730; padding: 10px; border-radius: 10px;
-        border: 1px solid #41444b; margin-bottom: 10px; text-align: center;
-    }
-    .currency-value { font-size: 28px; font-weight: bold; color: #ffffff; }
-    .rebalance-buy { color: #00FF00; font-weight: bold; }
-    .rebalance-sell { color: #FF4B4B; font-weight: bold; }
+/* Uygulama & sidebar arka plan */
+[data-testid="stAppViewContainer"] {
+    background-color: #050608;
+}
+[data-testid="stSidebar"] {
+    background-color: #101119;
+    border-right: 1px solid #242632;
+}
+
+/* Genel yazı tipi & renkler */
+html, body, [class*="css"]  {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: #f5f5f5;
+}
+
+/* Ana başlık */
+.main-title {
+    text-align: center;
+    color: #4e8cff;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+/* Küçük başlık (sidebar info satırları) */
+.sidebar-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #d0d3ff;
+    margin-top: 10px;
+    margin-bottom: -4px;
+}
+
+/* Tarih / saat yazıları */
+.sidebar-caption {
+    font-size: 12px;
+    color: #b0b3c5;
+}
+
+/* USD / EUR kartları */
+.currency-card {
+    background: radial-gradient(circle at 10% 20%, #25293a 0%, #151623 80%);
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid #34384a;
+    margin-bottom: 8px;
+    text-align: center;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+}
+.currency-title {
+    font-size: 13px;
+    color: #b7b9cc;
+    margin-bottom: 2px;
+}
+.currency-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+/* Metric değerleri biraz büyük ve kalın */
+[data-testid="stMetricValue"] {
+    font-size: 28px;
+    font-weight: 800;
+}
+
+/* Bölüm kartı (ana sayfadaki bloklar için) */
+.section-card {
+    border-radius: 16px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, #111320 0%, #141724 60%, #10121c 100%);
+    border: 1px solid #26293a;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.45);
+}
+
+/* Section başlık çizgisi */
+.section-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.section-title span {
+    font-size: 20px;
+}
+
+/* DataFrame header'larını biraz koyulaştıralım */
+thead tr th {
+    background-color: #1c1f2b !important;
+    color: #f5f5f5 !important;
+}
+
+/* Tabs üzerindeki ince çizgiyi kaldırıp daha temiz görünüm */
+button[role="tab"] {
+    border-radius: 999px !important;
+    padding: 4px 14px !important;
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
@@ -846,7 +940,35 @@ def main():
         st.stop()
 
     with st.sidebar:
-        st.markdown("<h1 style='text-align: center; color: #4e8cff;'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
+            st.markdown("<h1 class='main-title'>💎 Varlık Paneli</h1>", unsafe_allow_html=True)
+        
+            last = df_prices.iloc[-1]
+            last_price_date = last.get("Tarih")
+        
+            if pd.notna(last_price_date):
+                st.markdown("<div class='sidebar-label'>📊 Son Veri Tarihi</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='sidebar-caption'>{pd.to_datetime(last_price_date).strftime('%d.%m.%Y %H:%M:%S')}</div>",
+                    unsafe_allow_html=True
+                )
+        
+            # Uygulama zamanı
+            now_dt = datetime.now()
+            st.markdown("<div class='sidebar-label' style='margin-top:10px;'>🕒 Uygulama Zamanı</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='sidebar-caption'>{now_dt.strftime('%d.%m.%Y %H:%M:%S')}</div>",
+                unsafe_allow_html=True
+            )
+        
+            # USD / EUR kartları alttaki gibi kalabilir
+            usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
+            eur = float(last.get("EURO KURU", 0.0) or 0.0)
+        
+            st.markdown(
+                f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div><div class="currency-value">{usd:.2f} ₺</div></div>'
+                f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div><div class="currency-value">{eur:.2f} ₺</div></div>',
+                unsafe_allow_html=True
+            )
         last = df_prices.iloc[-1]
     
         # 📊 Sheet'teki son fiyat tarihi (tarih + saat)
