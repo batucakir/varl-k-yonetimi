@@ -398,7 +398,7 @@ def calculate_external_cashflows(df_trans):
       - DIS_CIKIS  + SATIS => dışarıya para çıkışı
     PORTFOY_ICI hareketler (altın satıp TL’ye geçmek gibi) cashflow sayılmaz.
     """
-    if df_trans.empty:
+    if df_trans is None or df_trans.empty:
         return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
 
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
@@ -407,8 +407,9 @@ def calculate_external_cashflows(df_trans):
     if "Kaynak" not in df.columns:
         df["Kaynak"] = ""
 
-    this_month = datetime.now().month
-    this_year = datetime.now().year
+    today = datetime.now().date()
+    this_month = today.month
+    this_year = today.year
 
     total_in = 0.0
     total_out = 0.0
@@ -417,38 +418,35 @@ def calculate_external_cashflows(df_trans):
 
     for _, r in df.iterrows():
         varlik = str(r.get("Varlık", "")).upper().strip()
-        islem = _normalize_islem(r.get("İşlem", ""))
-        kaynak = str(r.get("Kaynak", "")).upper().strip()
-        adet = float(r.get("Adet", 0) or 0)
-        tarih = r.get("Tarih")
-
-        # sadece TL Bakiye satırları
         if varlik != "TL BAKIYE":
             continue
 
-        net = 0.0
+        islem = str(r.get("İşlem", "")).upper().strip()
+        kaynak = str(r.get("Kaynak", "")).upper().strip()
+        adet = float(r.get("Adet", 0) or 0)
+        tarih_val = r.get("Tarih")
 
+        net = 0.0
         if kaynak == "DIS_GIRIS" and islem == "ALIS":
             total_in += adet
             net = adet
-
         elif kaynak == "DIS_CIKIS" and islem == "SATIS":
             total_out += adet
             net = -adet
-
         else:
-            continue  # PORTFOY_ICI veya boş ise cashflow sayma
+            # PORTFOY_ICI veya boş ise cashflow sayma
+            continue
 
-        if pd.notna(tarih):
-            if tarih.date() == today:
+        # tarih güvenli şekilde işleniyor
+        if pd.notna(tarih_val):
+            d = pd.Timestamp(tarih_val).date()
+            if d == today:
                 today_net += net
-            if tarih.month == this_month and tarih.year == this_year:
+            if d.year == this_year and d.month == this_month:
                 month_net += net
-                
-        today = df_trans["Tarih"].max().date()
-        today_realized = realized_per_day.get(today, 0.0)
 
     return total_in, total_out, month_net, today_net
+
     
 def external_cashflow_table(df_trans, limit=50):
     """
