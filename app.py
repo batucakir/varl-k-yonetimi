@@ -777,7 +777,7 @@ def render_rebalance_assistant(df_view):
 
     # DİĞER
     if others_val != 0 or target_ratios["DİĞER"] > 0:
-        add_row("DİĞER", others_val, target_ratros["DİĞER"])
+        add_row("DİĞER", others_val, target_ratios["DİĞER"])
 
     df_analysis = pd.DataFrame(analysis_rows)
 
