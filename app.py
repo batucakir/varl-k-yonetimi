@@ -996,7 +996,7 @@ def main():
                 
                 st.divider()
                 
-                if not df_view.empty:
+                if curr == "TL" and not df_view.empty:
                     render_rebalance_assistant(df_view)
                 
                 st.divider()
