@@ -122,6 +122,33 @@ button[role="tab"] {
     border-radius: 999px !important;
     padding: 4px 14px !important;
 }
+
+/* Expander başlıkları biraz daha okunaklı olsun */
+.streamlit-expanderHeader {
+    font-weight: 600;
+    font-size: 14px;
+    color: #e2e4ff;
+}
+
+/* Radio / menü butonları daha pill gibi dursun */
+[data-baseweb="radio"] > div {
+    background: #161827;
+    padding: 4px 6px;
+    border-radius: 999px;
+}
+[data-baseweb="radio"] label {
+    padding: 2px 10px;
+    border-radius: 999px;
+}
+
+/* Biraz button hover efekti */
+button[kind="secondary"] {
+    border-radius: 999px !important;
+}
+button:hover {
+    filter: brightness(1.05);
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1084,20 +1111,48 @@ def main():
 
         for i, (tab, curr, rate) in enumerate(zip(tabs, ["TL", "$", "€"], [1.0, usd if usd > 0 else 1.0, eur if eur > 0 else 1.0])):
             with tab:
-                c1, c2, c3 = st.columns(3)
-                c4, c5, c6 = st.columns(3)
+                # 🧾 Portföy özeti kartı
+                st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='section-title'><span>📌</span>{curr} Portföy Özeti</div>",
+                    unsafe_allow_html=True
+                )
                 
+                # Üst satır: toplam varlık, net kâr, kâr oranı
+                c1, c2, c3 = st.columns(3)
+                c1.metric(
+                    "Toplam Varlık",
+                    f"{format_tr_money(tot_w / rate)} {curr}",
+                    f"Vergi: -{format_tr_money(tot_t / rate)}"
+                )
+                c2.metric(
+                    "Net Kâr",
+                    f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}"
+                )
+                c3.metric(
+                    "Kâr Oranı",
+                    f"%{((df_view['Net Kâr'].sum() / df_view['Maliyet'].sum()) * 100) if (not df_view.empty and df_view['Maliyet'].sum() > 0) else 0:,.2f}"
+                )
+                
+                st.markdown("---")
+                
+                # Orta satır: realized metrikleri
+                c4, c5, c6 = st.columns(3)
                 c4.metric("Toplam Realized", pretty_metric(total_realized / rate, curr))
                 c5.metric("Bu Ay Realized", pretty_metric(month_realized / rate, curr))
                 c6.metric("Bugün Realized", pretty_metric(today_realized / rate, curr))
-                p1, p2 = st.columns(2)
-
+                
+                st.markdown("---")
+                
+                # Alt satır: portföy içi nakit
                 # --- TL Bakiye (portföy içi nakit) ---
                 tl_row = df_view[df_view["Varlık"].str.upper().str.contains("TL BAKIYE", na=False)]
                 tl_balance = float(tl_row["Net Değer"].sum()) if not tl_row.empty else 0.0
                 
                 n1, n2 = st.columns(2)
                 n1.metric("Portföy İçi Nakit (TL Bakiye)", pretty_metric(tl_balance / rate, curr))
+                
+                st.markdown("</div>", unsafe_allow_html=True)
 
                 # 💸 Dış nakit akışı kartı
                 st.markdown("<div class='section-card'>", unsafe_allow_html=True)
@@ -1133,25 +1188,31 @@ def main():
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
-                
-                c1.metric("Toplam Varlık", f"{format_tr_money(tot_w / rate)} {curr}", f"Vergi: -{format_tr_money(tot_t / rate)}")
-                c2.metric("Net Kâr", f"{format_tr_money(df_view['Net Kâr'].sum() / rate)} {curr}" if not df_view.empty else f"0 {curr}")
-                c3.metric("Kâr Oranı", f"%{((df_view['Net Kâr'].sum() / df_view['Maliyet'].sum()) * 100) if (not df_view.empty and df_view['Maliyet'].sum() > 0) else 0:,.2f}")
-
                 if curr == "TL":
-                    st.divider()
-                    st.subheader(f"🎯 Hedef: {format_tr_money(HEDEF_SERVET_TL)} TL")
-                    st.progress(min(tot_w / HEDEF_SERVET_TL, 1.0) if HEDEF_SERVET_TL > 0 else 0.0)
-
-                    # ✅ DÜZELTME: kalan yüzdesi doğru
                     remain = HEDEF_SERVET_TL - tot_w
                     progress_pct = (tot_w / HEDEF_SERVET_TL) * 100 if HEDEF_SERVET_TL > 0 else 0
                     remain_pct = (remain / HEDEF_SERVET_TL) * 100 if HEDEF_SERVET_TL > 0 else 0
+                    gun_kaldi = (HEDEF_TARIH - datetime.now()).days
+                
+                    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='section-title'><span>🎯</span>Hedef Servet: {format_tr_money(HEDEF_SERVET_TL)} TL</div>",
+                        unsafe_allow_html=True
+                    )
+                
+                    st.progress(min(tot_w / HEDEF_SERVET_TL, 1.0) if HEDEF_SERVET_TL > 0 else 0.0)
+                
+                    h1, h2, h3 = st.columns(3)
+                    h1.metric("Tamamlanan", f"%{progress_pct:.1f}")
+                    h2.metric("Kalan Tutar", f"{format_tr_money(remain)} TL")
+                    h3.metric("Kalan Gün", f"{gun_kaldi} gün")
+                
+                    st.caption(
+                        f"⏳ Bitiş tarihi: **{HEDEF_TARIH.strftime('%d.%m.%Y')}** – hedefe ulaştığında bu bar dolacak."
+                    )
+                
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-                    h1, h2 = st.columns(2)
-                    h1.write(f"🏁 Kalan: **{format_tr_money(remain)} TL** (%{remain_pct:.1f})")
-                    h2.write(f"⏳ Bitiş: **{HEDEF_TARIH.strftime('%d.%m.%Y')}** ({(HEDEF_TARIH - datetime.now()).days} Gün)")
-                    st.caption(f"✅ Tamamlanan: %{progress_pct:.1f}")
 
                 st.subheader("📈 Servet Değişimi")
                 df_trend = prepare_historical_trend(df_prices, df_trans, rate)
