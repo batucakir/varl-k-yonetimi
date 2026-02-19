@@ -235,13 +235,36 @@ def calculate_portfolio(df_trans, df_prices):
     return pd.DataFrame(rows), tot_w, tot_t
 
 # --- REALIZED P&L HESAPLAMA ---
+def _canon_asset_name(v: str) -> str:
+    """
+    Aynı varlığın farklı yazımlarını tek anahtara indirger.
+    Örn:
+      'ASELS.IS (Hisse)' -> 'ASELS.IS'
+      'ASELS HISSE'      -> 'ASELS'
+      'TLY FONU'         -> 'TLY'
+      'TL Bakiye'        -> 'TL BAKIYE'
+    """
+    s = str(v or "").strip().upper()
+
+    s = s.replace("(HİSSE)", "").replace("(HISSE)", "").replace("(HISSE)", "")
+    s = s.replace(" HİSSE", "").replace(" HISSE", "")
+    s = s.replace(" FONU", "").replace(" FON", "")
+    s = s.strip()
+
+    # TL bakiye normalize
+    if "TL" in s and "BAKIYE" in s:
+        return "TL BAKIYE"
+
+    return s
+
+
 def calculate_realized_pnl(df_trans):
-    if df_trans.empty:
+    if df_trans is None or df_trans.empty:
         return 0.0, 0.0, 0.0
 
-    df_trans = df_trans.sort_values("Tarih").copy()
+    df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
 
-    positions = {}
+    positions = {}  # varlık -> {"adet":..., "maliyet":...}
     total_realized = 0.0
     today_realized = 0.0
     month_realized = 0.0
@@ -250,14 +273,21 @@ def calculate_realized_pnl(df_trans):
     this_month = datetime.now().month
     this_year = datetime.now().year
 
-    for _, row in df_trans.iterrows():
-        v = str(row.get("Varlık", "")).strip()
+    for _, row in df.iterrows():
+        raw_v = str(row.get("Varlık", "")).strip()
+        v = _canon_asset_name(raw_v)
+
+        tur = str(row.get("Tür", "")).upper().strip()
         islem = str(row.get("İşlem", "")).upper().strip()
         adet = float(row.get("Adet", 0) or 0)
         fiyat = float(row.get("Fiyat", 0) or 0)
         tarih = row.get("Tarih")
 
-        if v == "":
+        if not v or adet <= 0:
+            continue
+
+        # ✅ Nakit bacaklarını realized hesabından çıkar
+        if v == "TL BAKIYE" or tur in ["NAKİT", "NAKIT"]:
             continue
 
         if v not in positions:
@@ -268,22 +298,31 @@ def calculate_realized_pnl(df_trans):
             positions[v]["maliyet"] += adet * fiyat
 
         elif islem == "SATIS":
-            if positions[v]["adet"] > 0:
-                avg_cost = positions[v]["maliyet"] / positions[v]["adet"]
-                realized = (fiyat - avg_cost) * adet
+            held = positions[v]["adet"]
+            if held <= 0:
+                # elde yoksa realized yazma (isim uyuşmazlığı / eksik kayıt olabilir)
+                continue
 
-                total_realized += realized
+            qty = min(adet, held)  # ✅ sadece eldeki kadarını kapat
+            avg_cost = positions[v]["maliyet"] / held if held > 0 else 0.0
+            realized = (fiyat - avg_cost) * qty
 
-                if pd.notna(tarih):
-                    if tarih.date() == today:
-                        today_realized += realized
-                    if tarih.month == this_month and tarih.year == this_year:
-                        month_realized += realized
+            total_realized += realized
 
-                positions[v]["adet"] -= adet
-                positions[v]["maliyet"] -= avg_cost * adet
+            if pd.notna(tarih):
+                if tarih.date() == today:
+                    today_realized += realized
+                if tarih.month == this_month and tarih.year == this_year:
+                    month_realized += realized
+
+            # pozisyonu düş
+            positions[v]["adet"] -= qty
+            positions[v]["maliyet"] -= avg_cost * qty
+
+            # adet > held ise (fazla satış) burada bilerek yok sayıyoruz.
 
     return total_realized, month_realized, today_realized
+
 
     for _, r in df.iterrows():
         tur = str(r.get("Tür", "")).upper().strip()
