@@ -938,7 +938,6 @@ def main():
                 if not df_view.empty:
                     df_show = df_view.copy()
                 
-                    # ✅ Yeni kolonlar (TL bazında hesapla)
                     # Ortalama maliyet: maliyet / adet  (adet 0 ise 0)
                     df_show["Ortalama Maliyet"] = np.where(
                         df_show["Adet"] > 0,
@@ -949,11 +948,11 @@ def main():
                     # Brüt değer: adet * fiyat (vergisiz)
                     df_show["Brüt Değer"] = df_show["Adet"] * df_show["Fiyat"]
                 
-                    # ✅ Kur dönüşümü (gösterim için)
+                    # Kur dönüşümü (gösterim için)
                     for c in ["Fiyat", "Maliyet", "Brüt Değer", "Net Değer", "Net Kâr", "Vergi", "Ortalama Maliyet"]:
                         df_show[c] = df_show[c] / rate
                 
-                    # ✅ Kâr % (maliyet 0 ise 0 yaz)
+                    # Kâr %
                     df_show["Kâr %"] = np.where(
                         df_show["Maliyet"] > 0,
                         (df_show["Net Kâr"] / df_show["Maliyet"]) * 100,
@@ -977,21 +976,33 @@ def main():
                 else:
                     st.info("Henüz işlem/varlık yok.")
                 
+                # ⬇️ BURADAN SONRASI ARTIK HER ZAMAN ÇALIŞACAK
+                
                 st.divider()
                 st.subheader("🥇 Kıymetli Metal Alım-Satım Farkları")
+                
                 gm = st.columns(4)
-                for idx, (n, k) in enumerate([("Gram", "GRAM ALTIN"), ("Ata", "ATA ALTIN"), ("22 Ayar", "22 AYAR ALTIN"), ("Çeyrek", "ÇEYREK ALTIN")]):
+                for idx, (n, k) in enumerate([
+                    ("Gram", "GRAM ALTIN"),
+                    ("Ata", "ATA ALTIN"),
+                    ("22 Ayar", "22 AYAR ALTIN"),
+                    ("Çeyrek", "ÇEYREK ALTIN"),
+                ]):
                     s = float(last.get(f"{k} SATIŞ", 0) or 0)
                     a = float(last.get(f"{k} ALIŞ", 0) or 0)
                     diff = s - a
                     p_diff = (diff / s) * 100 if s > 0 else 0
                     gm[idx].metric(n, f"{s:,.2f} ₺", f"Makas: {diff:,.2f} ₺ (%{p_diff:.2f})")
+                
                 st.divider()
+                
                 if not df_view.empty:
                     render_rebalance_assistant(df_view)
+                
                 st.divider()
-                        
+                
                 st.subheader("🧾 Aylık Realized Özeti")
+
                 
                 df_month = realized_monthly_summary(df_trans)
                 
