@@ -769,9 +769,6 @@ def render_rebalance_assistant(df_view):
         hide_index=True
     )
 
-
-    st.dataframe(pd.DataFrame(analysis), use_container_width=True, hide_index=True)
-
 FON_GREEN_TONES = [
     "#2ca02c",  # koyu
     "#3cb44b",
