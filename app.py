@@ -676,26 +676,29 @@ def render_rebalance_assistant(df_view):
     for g in core_groups:
         grp_vals[g] = float(df_view.loc[df_view["Grup"] == g, "Net Değer"].sum() or 0.0)
 
-    others_val = float(df_view.loc[~df_view["Grup"].isin(core_groups), "Net Değer"].sum() or 0.0)
+    # Diğer her şey
+    others_val = float(
+        df_view.loc[~df_view["Grup"].isin(core_groups), "Net Değer"].sum() or 0.0
+    )
     total_val = sum(grp_vals.values()) + others_val
 
     if total_val <= 0:
         st.info("Toplam portföy değeri 0 görünüyor, rebalans hesaplanamıyor.")
         return
 
-    # 🎯 Default hedefler: ALTIN 30, FON 60, NAKİT 3, HİSSE 7, DİĞER 0
+    # 🎯 Default hedefler: ALTIN 30, FON 55, HİSSE 7, NAKİT 3, DİĞER otomatik
     default_targets = {
-        "ALTIN": 35.0,
+        "ALTIN": 30.0,
         "FON": 55.0,
-        "NAKİT": 3.0,
         "HİSSE": 7.0,
-        "DİĞER": 0.0,
+        "NAKİT": 3.0,
     }
 
     st.markdown("**🎯 Hedef Dağılım (düzenlenebilir)**")
 
     c1, c2, c3, c4 = st.columns(4)
     target_ratios = {}
+
     with c1:
         target_ratios["ALTIN"] = st.number_input(
             "ALTIN hedef %",
@@ -729,13 +732,17 @@ def render_rebalance_assistant(df_view):
             key="reb_target_NAKIT",
         )
 
-    # DİĞER hedefini otomatik: 100 - (diğer 4 grup)
-    others_target_pct = max(0.0, 100.0 - (
-        target_ratios["ALTIN"] +
-        target_ratios["FON"] +
-        target_ratios["HİSSE"] +
-        target_ratios["NAKİT"]
-    ))
+    # DİĞER hedefi otomatik: 100 - (diğer 4 grup)
+    others_target_pct = max(
+        0.0,
+        100.0
+        - (
+            target_ratios["ALTIN"]
+            + target_ratios["FON"]
+            + target_ratios["HİSSE"]
+            + target_ratios["NAKİT"]
+        ),
+    )
     target_ratios["DİĞER"] = others_target_pct
 
     total_target = sum(target_ratios.values())
@@ -760,16 +767,18 @@ def render_rebalance_assistant(df_view):
         else:
             action = "🆗 Dengeli"
 
-        analysis_rows.append({
-            "Grup": name,
-            "Mevcut Değer (TL)": current_val,
-            "Mevcut Oran %": current_pct,
-            "Hedef Oran %": target_pct,
-            "Hedef Değer (TL)": target_val,
-            "Fark (TL)": diff_tl,
-            "Fark %": diff_pct,
-            "Öneri": action,
-        })
+        analysis_rows.append(
+            {
+                "Grup": name,
+                "Mevcut Değer (TL)": current_val,
+                "Mevcut Oran %": current_pct,
+                "Hedef Oran %": target_pct,
+                "Hedef Değer (TL)": target_val,
+                "Fark (TL)": diff_tl,
+                "Fark %": diff_pct,
+                "Öneri": action,
+            }
+        )
 
     # 4 ana grup
     for g in core_groups:
@@ -781,47 +790,26 @@ def render_rebalance_assistant(df_view):
 
     df_analysis = pd.DataFrame(analysis_rows)
 
-    # Küçük özet (göz karar metrik)
+    # Küçük özet metrik
     total_deviation = df_analysis["Fark (TL)"].abs().sum() / 2.0
     avg_deviation_pct = (total_deviation / total_val * 100.0) if total_val > 0 else 0.0
     st.metric("Toplam Sapma (yaklaşık)", f"%{avg_deviation_pct:.1f}")
 
     st.dataframe(
-        df_analysis.style.format({
-            "Mevcut Değer (TL)": "{:,.2f}",
-            "Hedef Değer (TL)": "{:,.2f}",
-            "Fark (TL)": "{:,.2f}",
-            "Mevcut Oran %": "{:,.1f}",
-            "Hedef Oran %": "{:,.1f}",
-            "Fark %": "{:,.1f}",
-        }),
+        df_analysis.style.format(
+            {
+                "Mevcut Değer (TL)": "{:,.2f}",
+                "Hedef Değer (TL)": "{:,.2f}",
+                "Fark (TL)": "{:,.2f}",
+                "Mevcut Oran %": "{:,.1f}",
+                "Hedef Oran %": "{:,.1f}",
+                "Fark %": "{:,.1f}",
+            }
+        ),
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
     )
 
-    # 4) Özet metrik
-    avg_deviation_pct = (total_deviation_tl / 2.0) / total_val * 100.0  # kabaca toplam sapma
-    st.metric(
-        "Toplam Sapma (yaklaşık)",
-        f"%{avg_deviation_pct:.1f}",
-        help="Gruplar arasındaki toplam hedeften sapmayı gösteren yaklaşık değer"
-    )
-
-    # 5) Tabloyu göster
-    df_analysis = pd.DataFrame(analysis_rows)
-
-    st.dataframe(
-        df_analysis.style.format({
-            "Mevcut Değer (TL)": "{:,.2f}",
-            "Hedef Değer (TL)": "{:,.2f}",
-            "Fark (TL)": "{:,.2f}",
-            "Mevcut Oran %": "{:,.1f}",
-            "Hedef Oran %": "{:,.1f}",
-            "Fark %": "{:,.1f}",
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
 
 FON_GREEN_TONES = [
     "#2ca02c",  # koyu
