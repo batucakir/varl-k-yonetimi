@@ -1255,7 +1255,7 @@ def main():
                         color_map = c_map_group
                     else:
                         items = df_p[g_col].astype(str).tolist()
-                        fund_colors = ["#2ca02c","#3cb44b","#66c266","#8fd18f","#b6e3b6","#1f7a1f",]
+                        fund_colors = ["#26de26","#034f0d","#73d973","#8fd18f","#b6e3b6","#1f7a1f",]
                 
                         color_map = {}
                         fund_i = 0
