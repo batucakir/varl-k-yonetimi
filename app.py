@@ -306,8 +306,8 @@ def calculate_realized_pnl(df_trans):
     Portföy içi realized P&L:
       - Nakit bacakları (TL Bakiye / NAKİT) hariç
       - total_realized   : tüm zamanların toplamı
-      - month_realized   : içinde bulunulan ayın toplamı
-      - today_realized   : SON İŞLEM GÜNÜNÜN realized toplamı
+      - month_realized   : son işlem gününün bulunduğu ayın toplamı
+      - today_realized   : son işlem gününün realized toplamı
     """
     if df_trans is None or df_trans.empty:
         return 0.0, 0.0, 0.0
@@ -316,10 +316,6 @@ def calculate_realized_pnl(df_trans):
 
     positions = {}          # varlık -> {"adet":..., "maliyet":...}
     realized_per_day = {}   # tarih (date) -> realized TL
-
-    today = datetime.now().date()
-    this_month = today.month
-    this_year = today.year
 
     for _, row in df.iterrows():
         raw_v = str(row.get("Varlık", "")).strip()
@@ -348,14 +344,12 @@ def calculate_realized_pnl(df_trans):
         elif islem == "SATIS":
             held = positions[v]["adet"]
             if held <= 0:
-                # elde pozisyon yoksa bu satırı yok say
-                continue
+                continue  # elde pozisyon yoksa
 
             qty = min(adet, held)
             avg_cost = positions[v]["maliyet"] / held if held > 0 else 0.0
             realized = (fiyat - avg_cost) * qty
 
-            # tarih -> date normalizasyonu
             try:
                 d = pd.Timestamp(tarih).date()
             except Exception:
@@ -364,37 +358,24 @@ def calculate_realized_pnl(df_trans):
             if d is not None:
                 realized_per_day[d] = realized_per_day.get(d, 0.0) + realized
 
-            # pozisyonu azalt
             positions[v]["adet"] -= qty
             positions[v]["maliyet"] -= avg_cost * qty
 
-    # Toplam realized (tüm günlerin toplamı)
+    if not realized_per_day:
+        return 0.0, 0.0, 0.0
+
+    # En son işlem günü (sheet'teki en büyük tarih)
+    last_day = max(realized_per_day.keys())
+
     total_realized = sum(realized_per_day.values())
-
-    # En son işlem günü
-    last_day = max(realized_per_day.keys()) if realized_per_day else None
-
-    # Bu ay realized: son işlem gününün içinde olduğu ay
-    if last_day is not None:
-        month_realized = sum(
-            val for d, val in realized_per_day.items()
-            if d.month == last_day.month and d.year == last_day.year
-        )
-    else:
-        month_realized = 0.0
-
-    # "Bugün" realized:
-    # 1) Eğer sunucu tarihine ait realized varsa onu göster
-    # 2) Yoksa en son işlem gününün realized'ini göster
-    today = datetime.now().date()
-    if today in realized_per_day:
-        today_realized = realized_per_day[today]
-    elif last_day is not None:
-        today_realized = realized_per_day[last_day]
-    else:
-        today_realized = 0.0
+    month_realized = sum(
+        val for d, val in realized_per_day.items()
+        if d.year == last_day.year and d.month == last_day.month
+    )
+    today_realized = realized_per_day[last_day]
 
     return total_realized, month_realized, today_realized
+
 
 
 
