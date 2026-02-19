@@ -942,7 +942,18 @@ def main():
                     if view_mode == "Ana Gruplar":
                         color_map = c_map_group
                     else:
-                        color_map = {a: asset_color(a) for a in df_p[g_col].astype(str).unique()}
+                        items = df_p[g_col].astype(str).tolist()
+                        fund_colors = ["#2ca02c","#3cb44b","#66c266","#8fd18f","#b6e3b6","#1f7a1f",]
+
+                        color_map = {}
+                        fund_i = 0
+                        for a in items:
+                            u = a.upper()
+                            if "FON" in u:
+                                color_map[a] = fund_colors[fund i % len(fund_colors)]
+                                fund_i += 1
+                            else:
+                                color_map[a] = asset_color(a)
 
                     fig_p = px.pie(
                         df_p,
