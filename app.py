@@ -1014,19 +1014,21 @@ def main():
         usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
         eur = float(last.get("EURO KURU", 0.0) or 0.0)
     
-        # Önceki satırlar (günlük değişim için)
-        if len(df_prices) >= 2:
-            prev = df_prices.iloc[-2]
-        else:
-            prev = last
+        # Son tarih (sheet'teki son satır)
+        last_dt = df_prices["Tarih"].iloc[-1]
     
-        # Yaklaşık haftalık için: 5-7 satır gerisi (veri sıklığına göre)
-        if len(df_prices) >= 6:
-            week_prev = df_prices.iloc[-6]
-        elif len(df_prices) >= 2:
-            week_prev = df_prices.iloc[0]
-        else:
-            week_prev = last
+        # Belirli bir tarihten ÖNCEKİ/AYNI son fiyatı bulan yardımcı fonksiyon
+        def price_on_or_before(col_name, target_dt):
+            sub = df_prices[df_prices["Tarih"] <= target_dt]
+            if sub.empty:
+                return None
+            return float(sub.iloc[-1].get(col_name, 0.0) or 0.0)
+    
+        # 1 gün ve 7 gün önceki değerler
+        usd_prev_day   = price_on_or_before("DOLAR KURU", last_dt - pd.Timedelta(days=1))
+        usd_prev_week  = price_on_or_before("DOLAR KURU", last_dt - pd.Timedelta(days=7))
+        eur_prev_day   = price_on_or_before("EURO KURU", last_dt - pd.Timedelta(days=1))
+        eur_prev_week  = price_on_or_before("EURO KURU", last_dt - pd.Timedelta(days=7))
     
         def pct_change(curr, prev_val):
             curr = float(curr or 0.0)
@@ -1035,11 +1037,12 @@ def main():
                 return 0.0
             return (curr - prev_val) / prev_val * 100.0
     
+        # 🔴🟢 Renk kararını direkt işarete göre veriyoruz
         def fmt_change(pct):
-            if pct > 0.01:
+            if pct > 0:
                 cls = "currency-change-pos"
                 icon = "▲"
-            elif pct < -0.01:
+            elif pct < 0:
                 cls = "currency-change-neg"
                 icon = "▼"
             else:
@@ -1047,10 +1050,10 @@ def main():
                 icon = "●"
             return f'<span class="{cls}">{icon} {pct:+.2f}%</span>'
     
-        usd_d  = pct_change(usd, prev.get("DOLAR KURU", 0.0))
-        usd_w  = pct_change(usd, week_prev.get("DOLAR KURU", 0.0))
-        eur_d  = pct_change(eur, prev.get("EURO KURU", 0.0))
-        eur_w  = pct_change(eur, week_prev.get("EURO KURU", 0.0))
+        usd_d = pct_change(usd, usd_prev_day) if usd_prev_day is not None else 0.0
+        usd_w = pct_change(usd, usd_prev_week) if usd_prev_week is not None else 0.0
+        eur_d = pct_change(eur, eur_prev_day) if eur_prev_day is not None else 0.0
+        eur_w = pct_change(eur, eur_prev_week) if eur_prev_week is not None else 0.0
     
         st.markdown(
             f'''
