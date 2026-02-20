@@ -130,24 +130,6 @@ button[role="tab"] {
     color: #e2e4ff;
 }
 
-/* Radio / menü butonları daha pill gibi dursun */
-[data-baseweb="radio"] > div {
-    background: #161827;
-    padding: 4px 6px;
-    border-radius: 999px;
-}
-[data-baseweb="radio"] label {
-    padding: 2px 10px;
-    border-radius: 999px;
-}
-
-/* Biraz button hover efekti */
-button[kind="secondary"] {
-    border-radius: 999px !important;
-}
-button:hover {
-    filter: brightness(1.05);
-}
 /* Kur kartı değişim satırları */
 .currency-change-row {
     font-size: 11px;
@@ -173,6 +155,25 @@ button:hover {
 .currency-change-flat {
     color: #b0b3c5;
     font-weight: 500;
+}
+
+/* Radio / menü butonları daha pill gibi dursun */
+[data-baseweb="radio"] > div {
+    background: #161827;
+    padding: 4px 6px;
+    border-radius: 999px;
+}
+[data-baseweb="radio"] label {
+    padding: 2px 10px;
+    border-radius: 999px;
+}
+
+/* Biraz button hover efekti */
+button[kind="secondary"] {
+    border-radius: 999px !important;
+}
+button:hover {
+    filter: brightness(1.05);
 }
 
 </style>
