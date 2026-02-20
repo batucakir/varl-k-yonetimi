@@ -148,6 +148,32 @@ button[kind="secondary"] {
 button:hover {
     filter: brightness(1.05);
 }
+/* Kur kartı değişim satırları */
+.currency-change-row {
+    font-size: 11px;
+    margin-top: 4px;
+    line-height: 1.3;
+}
+
+.currency-change-label {
+    color: #9ca0b8;
+    margin-right: 4px;
+}
+
+.currency-change-pos {
+    color: #4caf50;
+    font-weight: 600;
+}
+
+.currency-change-neg {
+    color: #ff5252;
+    font-weight: 600;
+}
+
+.currency-change-flat {
+    color: #b0b3c5;
+    font-weight: 500;
+}
 
 </style>
 """, unsafe_allow_html=True)
@@ -983,17 +1009,70 @@ def main():
             unsafe_allow_html=True
         )
     
-        # 💵 USD / EUR kartları (tek sefer)
+        # 💵 USD / EUR kartları + günlük / haftalık değişim
         usd = float(last.get("DOLAR KURU", 0.0) or 0.0)
         eur = float(last.get("EURO KURU", 0.0) or 0.0)
     
+        # Önceki satırlar (günlük değişim için)
+        if len(df_prices) >= 2:
+            prev = df_prices.iloc[-2]
+        else:
+            prev = last
+    
+        # Yaklaşık haftalık için: 5-7 satır gerisi (veri sıklığına göre)
+        if len(df_prices) >= 6:
+            week_prev = df_prices.iloc[-6]
+        elif len(df_prices) >= 2:
+            week_prev = df_prices.iloc[0]
+        else:
+            week_prev = last
+    
+        def pct_change(curr, prev_val):
+            curr = float(curr or 0.0)
+            prev_val = float(prev_val or 0.0)
+            if prev_val <= 0:
+                return 0.0
+            return (curr - prev_val) / prev_val * 100.0
+    
+        def fmt_change(pct):
+            if pct > 0.01:
+                cls = "currency-change-pos"
+                icon = "▲"
+            elif pct < -0.01:
+                cls = "currency-change-neg"
+                icon = "▼"
+            else:
+                cls = "currency-change-flat"
+                icon = "●"
+            return f'<span class="{cls}">{icon} {pct:+.2f}%</span>'
+    
+        usd_d  = pct_change(usd, prev.get("DOLAR KURU", 0.0))
+        usd_w  = pct_change(usd, week_prev.get("DOLAR KURU", 0.0))
+        eur_d  = pct_change(eur, prev.get("EURO KURU", 0.0))
+        eur_w  = pct_change(eur, week_prev.get("EURO KURU", 0.0))
+    
         st.markdown(
-            f'<div class="currency-card"><div class="currency-title">🇺🇸 USD</div>'
-            f'<div class="currency-value">{usd:.2f} ₺</div></div>'
-            f'<div class="currency-card"><div class="currency-title">🇪🇺 EUR</div>'
-            f'<div class="currency-value">{eur:.2f} ₺</div></div>',
+            f'''
+            <div class="currency-card">
+                <div class="currency-title">🇺🇸 USD</div>
+                <div class="currency-value">{usd:.2f} ₺</div>
+                <div class="currency-change-row">
+                    <span class="currency-change-label">Günlük:</span> {fmt_change(usd_d)}<br>
+                    <span class="currency-change-label">Haftalık:</span> {fmt_change(usd_w)}
+                </div>
+            </div>
+            <div class="currency-card">
+                <div class="currency-title">🇪🇺 EUR</div>
+                <div class="currency-value">{eur:.2f} ₺</div>
+                <div class="currency-change-row">
+                    <span class="currency-change-label">Günlük:</span> {fmt_change(eur_d)}<br>
+                    <span class="currency-change-label">Haftalık:</span> {fmt_change(eur_w)}
+                </div>
+            </div>
+            ''',
             unsafe_allow_html=True
         )
+
     
         # Menü
         page = st.radio("Menü", ["Portföyüm", "Piyasa Takip"], label_visibility="collapsed")
