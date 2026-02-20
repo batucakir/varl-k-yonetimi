@@ -1614,9 +1614,10 @@ def main():
                         use_container_width=True,
                         hide_index=True
                     )        
-
+                    
     elif page == "Piyasa Takip":
-        st.markdown("## 🌍 Detaylı Piyasa Analizi")
+        # küçük versiyon numarası koydum, gerçekten yeni kodun çalıştığını anlayalım
+        st.markdown("## 🌍 Detaylı Piyasa Analizi v2")
 
         last = df_prices.iloc[-1]
         prev = df_prices.iloc[-2] if len(df_prices) >= 2 else last
@@ -1867,10 +1868,10 @@ def main():
                         use_container_width=True,
                         hide_index=True
                     )
-
                 else:
                     st.error("Bu sembolün fiyat kolonu bulunamadı.")
-                # --- BURADAN SONRASI: QUANT PİYASA MOTORU (YFINANCE) ---
+
+        # --- BURADAN SONRASI: QUANT PİYASA MOTORU (YFINANCE) ---
 
         st.divider()
         st.markdown("## 🧠 Quant Piyasa Motoru (yfinance)")
@@ -1881,6 +1882,8 @@ def main():
             s for s in universe
             if isinstance(s, str) and (".IS" in s.upper() or s.upper() in ["SPY", "QQQ", "BTC-USD", "XU100.IS"])
         ])
+
+        st.write("DEBUG: yf_universe =", yf_universe)
 
         if not yf_universe:
             st.info("yfinance ile takip edilebilir sembol bulunamadı. Örn: SASA.IS, XU100.IS gibi ekleyebilirsin.")
@@ -1957,8 +1960,6 @@ def main():
                     else:
                         x_col = df_detail.columns[0]  # ilk kolon tarih ise
 
-                    # Son 6 aylık/1 yıllık datası yeterli -> tail ile alıyoruz
-                    # (period zaten üstte seçildiği için burada ekstra kısıt şart değil ama readability için bıraktım)
                     df_plot = df_detail.dropna(subset=["close"]).copy()
 
                     # Fiyat + MA'ler grafiği
@@ -2018,7 +2019,6 @@ def main():
                             )
                         )
 
-                        # 30 & 70 seviyelerine çizgi
                         if not df_plot.empty:
                             x_min = df_plot[x_col].min()
                             x_max = df_plot[x_col].max()
