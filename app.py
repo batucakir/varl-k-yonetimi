@@ -994,35 +994,41 @@ def add_basic_indicators(df: pd.DataFrame,
     - Hareketli ortalamalar (MA20, MA50, MA200)
     - RSI(14)
     - 20 günlük yıllıklaştırılmış volatilite (log değil, basit getiriler)
+    Hata almamak için tüm hesaplamalar pandas Series üzerinde ve min_periods ile yapılıyor.
     """
     if df is None or df.empty:
         return df
 
     df = df.copy()
+
     if "close" not in df.columns:
         return df
 
-    close = df["close"].astype(float)
+    # Close'u güvenli şekilde numerik yap
+    close = pd.to_numeric(df["close"], errors="coerce")
+    df["close"] = close
 
-    # MA'ler
+    # --- MA'ler ---
     for w in ma_windows:
-        df[f"ma_{w}"] = close.rolling(w).mean()
+        df[f"ma_{w}"] = close.rolling(window=w, min_periods=w).mean()
 
-    # RSI(14)
+    # --- RSI(14) ---
     delta = close.diff()
-    gain = np.where(delta > 0, delta, 0.0)
-    loss = np.where(delta < 0, -delta, 0.0)
 
-    roll_up = pd.Series(gain).rolling(rsi_window).mean()
-    roll_down = pd.Series(loss).rolling(rsi_window).mean()
+    # kazanç / kayıp serileri
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    roll_up = gain.rolling(window=rsi_window, min_periods=rsi_window).mean()
+    roll_down = loss.rolling(window=rsi_window, min_periods=rsi_window).mean()
 
     rs = roll_up / roll_down
     rsi = 100.0 - (100.0 / (1.0 + rs))
-    df["rsi"] = rsi.values
+    df["rsi"] = rsi
 
-    # Günlük getiri & 20 günlük volatilite (yıllıklaştırılmış)
+    # --- Volatilite (20 günlük, yıllıklaştırılmış) ---
     df["ret"] = close.pct_change()
-    df["vol_20d"] = df["ret"].rolling(20).std() * np.sqrt(252)
+    df["vol_20d"] = df["ret"].rolling(window=20, min_periods=20).std() * np.sqrt(252)
 
     return df
 
@@ -1913,7 +1919,13 @@ def main():
 
             for sym in selected_yf:
                 df_yf = yf_download_ohlc(sym, period=yf_period, interval="1d")
-                df_yf = add_basic_indicators(df_yf)
+
+                # Bazı sembollerde veri veya indikatör hesabı patlarsa tüm sayfa göçmesin
+                try:
+                    df_yf = add_basic_indicators(df_yf)
+                except Exception as e:
+                    st.write(f"⚠️ {sym} için indikatör hesaplanamadı:", e)
+                    continue
 
                 if df_yf is None or df_yf.empty:
                     continue
