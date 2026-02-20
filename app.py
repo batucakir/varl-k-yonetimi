@@ -959,7 +959,138 @@ FON_GREEN_TONES = [
     "#b6e3b6",
     "#1f7a1f"
 ]
+# --- YFINANCE TABANLI PİYASA MOTORU ---
 
+@st.cache_data(ttl=300)
+def yf_download_ohlc(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
+    """
+    yfinance'den OHLCV verisi çeker.
+    - period: '1mo', '3mo', '6mo', '1y', '5y', 'max'
+    - interval: '1m', '5m', '15m', '30m', '1h', '1d', '1wk', ...
+    """
+    try:
+        data = yf.download(
+            symbol,
+            period=period,
+            interval=interval,
+            auto_adjust=False,
+            progress=False
+        )
+        if data is None or data.empty:
+            return pd.DataFrame()
+
+        # Index'teki tarihi kolona alıp isimleri küçültüyoruz
+        data = data.reset_index().rename(columns=str.lower)
+        # Beklenen kolonlar: date, open, high, low, close, adj close, volume
+        return data
+    except Exception:
+        return pd.DataFrame()
+
+
+def add_basic_indicators(df: pd.DataFrame,
+                         rsi_window: int = 14,
+                         ma_windows=(20, 50, 200)) -> pd.DataFrame:
+    """
+    - Hareketli ortalamalar (MA20, MA50, MA200)
+    - RSI(14)
+    - 20 günlük yıllıklaştırılmış volatilite (log değil, basit getiriler)
+    """
+    if df is None or df.empty:
+        return df
+
+    df = df.copy()
+    if "close" not in df.columns:
+        return df
+
+    close = df["close"].astype(float)
+
+    # MA'ler
+    for w in ma_windows:
+        df[f"ma_{w}"] = close.rolling(w).mean()
+
+    # RSI(14)
+    delta = close.diff()
+    gain = np.where(delta > 0, delta, 0.0)
+    loss = np.where(delta < 0, -delta, 0.0)
+
+    roll_up = pd.Series(gain).rolling(rsi_window).mean()
+    roll_down = pd.Series(loss).rolling(rsi_window).mean()
+
+    rs = roll_up / roll_down
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    df["rsi"] = rsi.values
+
+    # Günlük getiri & 20 günlük volatilite (yıllıklaştırılmış)
+    df["ret"] = close.pct_change()
+    df["vol_20d"] = df["ret"].rolling(20).std() * np.sqrt(252)
+
+    return df
+
+
+def build_signal_row(symbol: str, df: pd.DataFrame) -> dict | None:
+    """
+    Tek bir sembol için:
+      - Son fiyat
+      - Günlük %
+      - RSI
+      - MA20, MA50
+      - 20 günlük yıllıklaştırılmış vol
+      - Basit sinyal etiketi
+    """
+    if df is None or df.empty:
+        return None
+
+    df = df.dropna(subset=["close"]).copy()
+    if df.empty:
+        return None
+
+    last = df.iloc[-1]
+    price = float(last["close"])
+    rsi = float(last.get("rsi", np.nan))
+    ma20 = float(last.get("ma_20", np.nan))
+    ma50 = float(last.get("ma_50", np.nan))
+    vol20 = float(last.get("vol_20d", np.nan))
+
+    if len(df) >= 2:
+        prev = df.iloc[-2]
+        prev_close = float(prev["close"])
+        daily_chg = (price / prev_close - 1.0) * 100 if prev_close > 0 else np.nan
+    else:
+        daily_chg = np.nan
+
+    # Basit sinyal etiketi
+    tags = []
+
+    # Trend / momentum
+    if not np.isnan(ma20) and price > ma20:
+        tags.append("P>MA20")
+    if not np.isnan(ma50) and price > ma50:
+        tags.append("P>MA50")
+    if not np.isnan(ma20) and not np.isnan(ma50):
+        if ma20 > ma50:
+            tags.append("MA20>MA50 (Uptrend)")
+        elif ma20 < ma50:
+            tags.append("MA20<MA50 (Downtrend)")
+
+    # RSI sinyalleri
+    if not np.isnan(rsi):
+        if rsi > 70:
+            tags.append("RSI>70 (Overbought)")
+        elif rsi < 30:
+            tags.append("RSI<30 (Oversold)")
+
+    signal = ", ".join(tags)
+
+    return {
+        "Sembol": symbol,
+        "Fiyat": price,
+        "Günlük %": daily_chg,
+        "RSI": rsi,
+        "MA20": ma20,
+        "MA50": ma50,
+        "Yıllık Vol(20d)": vol20,
+        "Sinyal": signal,
+    }
 # --- PASTA RENKLEME (Varlık bazlı) ---
 def asset_color(name: str) -> str:
     n = str(name).upper()
@@ -1739,6 +1870,185 @@ def main():
 
                 else:
                     st.error("Bu sembolün fiyat kolonu bulunamadı.")
+                # --- BURADAN SONRASI: QUANT PİYASA MOTORU (YFINANCE) ---
 
+        st.divider()
+        st.markdown("## 🧠 Quant Piyasa Motoru (yfinance)")
+
+        # yfinance ile takip edilebilir olma ihtimali yüksek olan sembolleri filtreleyelim
+        # (BIST hisseleri genelde 'XXXX.IS' formatında)
+        yf_universe = sorted([
+            s for s in universe
+            if isinstance(s, str) and (".IS" in s.upper() or s.upper() in ["SPY", "QQQ", "BTC-USD", "XU100.IS"])
+        ])
+
+        if not yf_universe:
+            st.info("yfinance ile takip edilebilir sembol bulunamadı. Örn: SASA.IS, XU100.IS gibi ekleyebilirsin.")
+        else:
+            default_syms = yf_universe[:5]  # ilk birkaçını default seçelim
+            selected_yf = st.multiselect(
+                "Sinyal üretmek istediğin semboller (yfinance):",
+                yf_universe,
+                default=default_syms,
+            )
+
+            period_opt = st.selectbox(
+                "Veri periyodu (yfinance):",
+                ["3 Ay", "6 Ay", "1 Yıl"],
+                index=1,
+            )
+
+            if period_opt == "3 Ay":
+                yf_period = "3mo"
+            elif period_opt == "6 Ay":
+                yf_period = "6mo"
+            else:
+                yf_period = "1y"
+
+            summary_rows = []
+            data_dict = {}
+
+            for sym in selected_yf:
+                df_yf = yf_download_ohlc(sym, period=yf_period, interval="1d")
+                df_yf = add_basic_indicators(df_yf)
+
+                if df_yf is None or df_yf.empty:
+                    continue
+
+                data_dict[sym] = df_yf
+                row = build_signal_row(sym, df_yf)
+                if row is not None:
+                    summary_rows.append(row)
+
+            if not summary_rows:
+                st.warning("Seçili semboller için yfinance verisi çekilemedi.")
+            else:
+                df_sig = pd.DataFrame(summary_rows)
+
+                st.subheader("📋 Sinyal Özeti (Günlük)")
+                st.dataframe(
+                    df_sig.style.format({
+                        "Fiyat": "{:,.2f}",
+                        "Günlük %": "%{:.2f}",
+                        "RSI": "{:,.1f}",
+                        "MA20": "{:,.2f}",
+                        "MA50": "{:,.2f}",
+                        "Yıllık Vol(20d)": "{:,.2f}",
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                # Detay grafiği
+                st.subheader("📊 Teknik Grafik (OHLC + MA + RSI)")
+
+                detail_sym = st.selectbox(
+                    "Detay görmek istediğin sembol:",
+                    [r["Sembol"] for r in summary_rows],
+                )
+
+                df_detail = data_dict.get(detail_sym, pd.DataFrame()).copy()
+                if df_detail.empty:
+                    st.info("Bu sembol için veri bulunamadı.")
+                else:
+                    # Tarih sütunu
+                    if "date" in df_detail.columns:
+                        x_col = "date"
+                    else:
+                        x_col = df_detail.columns[0]  # ilk kolon tarih ise
+
+                    # Son 6 aylık/1 yıllık datası yeterli -> tail ile alıyoruz
+                    # (period zaten üstte seçildiği için burada ekstra kısıt şart değil ama readability için bıraktım)
+                    df_plot = df_detail.dropna(subset=["close"]).copy()
+
+                    # Fiyat + MA'ler grafiği
+                    fig_price = go.Figure()
+
+                    # OHLC (Candlestick)
+                    fig_price.add_trace(
+                        go.Candlestick(
+                            x=df_plot[x_col],
+                            open=df_plot["open"],
+                            high=df_plot["high"],
+                            low=df_plot["low"],
+                            close=df_plot["close"],
+                            name="Fiyat",
+                        )
+                    )
+
+                    # MA20
+                    if "ma_20" in df_plot.columns:
+                        fig_price.add_trace(
+                            go.Scatter(
+                                x=df_plot[x_col],
+                                y=df_plot["ma_20"],
+                                mode="lines",
+                                name="MA20",
+                            )
+                        )
+
+                    # MA50
+                    if "ma_50" in df_plot.columns:
+                        fig_price.add_trace(
+                            go.Scatter(
+                                x=df_plot[x_col],
+                                y=df_plot["ma_50"],
+                                mode="lines",
+                                name="MA50",
+                            )
+                        )
+
+                    fig_price.update_layout(
+                        height=520,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        xaxis_rangeslider_visible=False,
+                    )
+
+                    st.plotly_chart(fig_price, use_container_width=True)
+
+                    # RSI grafiği
+                    if "rsi" in df_plot.columns:
+                        fig_rsi = go.Figure()
+                        fig_rsi.add_trace(
+                            go.Scatter(
+                                x=df_plot[x_col],
+                                y=df_plot["rsi"],
+                                mode="lines",
+                                name="RSI(14)",
+                            )
+                        )
+
+                        # 30 & 70 seviyelerine çizgi
+                        if not df_plot.empty:
+                            x_min = df_plot[x_col].min()
+                            x_max = df_plot[x_col].max()
+
+                            fig_rsi.add_shape(
+                                type="line",
+                                x0=x_min,
+                                x1=x_max,
+                                y0=70,
+                                y1=70,
+                                line=dict(dash="dash"),
+                            )
+                            fig_rsi.add_shape(
+                                type="line",
+                                x0=x_min,
+                                x1=x_max,
+                                y0=30,
+                                y1=30,
+                                line=dict(dash="dash"),
+                            )
+
+                        fig_rsi.update_layout(
+                            height=220,
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            yaxis=dict(range=[0, 100]),
+                        )
+
+                        st.plotly_chart(fig_rsi, use_container_width=True)
+                    else:
+                        st.info("RSI verisi hesaplanamadı.")
+                        
 if __name__ == "__main__":
     main()
