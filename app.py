@@ -1027,7 +1027,7 @@ def add_basic_indicators(df: pd.DataFrame,
     return df
 
 
-def build_signal_row(symbol: str, df: pd.DataFrame) -> dict | None:
+def build_signal_row(symbol: str, df: pd.DataFrame):
     """
     Tek bir sembol için:
       - Son fiyat
