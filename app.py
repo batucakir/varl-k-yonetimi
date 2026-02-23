@@ -275,7 +275,15 @@ def load_data():
         # Transactions
         ws_trans = sheet.worksheet("Islemler")
         data_trans = ws_trans.get_all_values()
-        df_trans = pd.DataFrame(data_trans[1:], columns=data_trans[0]) if len(data_trans) > 1 else pd.DataFrame(columns=["Tarih","Tür","Varlık","İşlem","Adet","Fiyat"])
+
+        if len(data_trans) > 1:
+            df_trans = pd.DataFrame(data_trans[1:], columns=data_trans[0])
+
+            # 🔧 BURAYI EKLE: duplicate sütun isimlerini at
+            df_trans = df_trans.loc[:, ~df_trans.columns.duplicated()]
+        else:
+            df_trans = pd.DataFrame(columns=["Tarih","Tür","Varlık","İşlem","Adet","Fiyat"])
+
         if "Kaynak" not in df_trans.columns:
             df_trans["Kaynak"] = ""
 
