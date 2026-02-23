@@ -388,29 +388,6 @@ def now_tr():
     # Sunucu UTC ise yerel TR saati:
     return datetime.utcnow() + timedelta(hours=TZ_OFFSET)
 
-# --- REALIZED P&L HESAPLAMA ---
-def _canon_asset_name(v: str) -> str:
-    """
-    Aynı varlığın farklı yazımlarını tek anahtara indirger.
-    Örn:
-      'ASELS.IS (Hisse)' -> 'ASELS.IS'
-      'ASELS HISSE'      -> 'ASELS'
-      'TLY FONU'         -> 'TLY'
-      'TL Bakiye'        -> 'TL BAKIYE'
-    """
-    s = str(v or "").strip().upper()
-
-    s = s.replace("(HİSSE)", "").replace("(HISSE)", "").replace("(HISSE)", "")
-    s = s.replace(" HİSSE", "").replace(" HISSE", "")
-    s = s.replace(" FONU", "").replace(" FON", "")
-    s = s.strip()
-
-    # TL bakiye normalize
-    if "TL" in s and "BAKIYE" in s:
-        return "TL BAKIYE"
-
-    return s
-
 def _canon_asset_name(v: str) -> str:
     """
     Aynı varlığın farklı yazımlarını tek anahtara indirger.
@@ -453,89 +430,6 @@ def _normalize_date(dt):
         return pd.Timestamp(dt).date()
     except:
         return None
-
-def calculate_realized_pnl(df_trans):
-    """
-    Portföy içi realized P&L:
-      - Nakit bacakları (TL Bakiye / NAKİT) hariç
-      - total_realized : tüm zamanların toplam realized'ı
-      - month_realized : SON realized gününün bulunduğu ayın toplam realized'ı
-      - today_realized : SON realized gününün realized'ı
-    """
-    if df_trans is None or df_trans.empty:
-        return 0.0, 0.0, 0.0
-
-    # Tarihe göre sırala, NaN'leri at
-    df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
-
-    positions = {}   
-    rows = []        # her satış için: gün + realized
-
-    for _, row in df.iterrows():
-        raw_v = str(row.get("Varlık", "")).strip()
-        v = _canon_asset_name(raw_v)
-
-        tur = str(row.get("Tür", "")).upper().strip()
-        islem = _normalize_islem(row.get("İşlem", ""))
-        adet = float(row.get("Adet", 0) or 0)
-        fiyat = float(row.get("Fiyat", 0) or 0)
-        tarih = row.get("Tarih")
-        gun = _normalize_date(tarih)
-
-        # Geçersiz kayıtları at
-        if not v or adet <= 0 or gun is None:
-            continue
-
-        # Nakit ve TL Bakiye realized hesabına girmez
-        if v == "TL BAKIYE":
-            continue
-
-        if v not in positions:
-            positions[v] = {"adet": 0.0, "maliyet": 0.0}
-
-        if islem == "ALIS":
-            positions[v]["adet"] += adet
-            positions[v]["maliyet"] += adet * fiyat
-
-        elif islem == "SATIS":
-            held = positions[v]["adet"]
-            if held <= 0:
-                continue
-
-            qty = min(adet, held)
-            avg_cost = positions[v]["maliyet"] / held if held > 0 else 0.0
-            realized = (fiyat - avg_cost) * qty
-
-            # Gün bazlı kayıt tut
-            rows.append({
-                "Gun": gun,
-                "Realized": realized,
-            })
-
-            # Pozisyonu azalt
-            positions[v]["adet"] -= qty
-            positions[v]["maliyet"] -= avg_cost * qty
-
-    # Hiç satış yoksa
-    if not rows:
-        return 0.0, 0.0, 0.0
-
-    df_sales = pd.DataFrame(rows)
-
-    df_sales["Gun"] = pd.to_datetime(df_sales["Gun"])
-
-    per_day = df_sales.groupby("Gun")["Realized"].sum()
-
-    total_realized = float(per_day.sum())
-
-    last_day = per_day.index.max()   # Timestamp
-
-    month_mask = (per_day.index.year == last_day.year) & (per_day.index.month == last_day.month)
-    month_realized = float(per_day[month_mask].sum())
-
-    today_realized = float(per_day.loc[last_day])
-
-    return total_realized, month_realized, today_realized
 
 def calculate_realized_pnl(df_trans):
     """
@@ -641,6 +535,72 @@ def calculate_realized_pnl(df_trans):
 
     return total_realized, month_realized, today_realized
 
+def calculate_external_cashflows(df_trans):
+    """
+    Dış nakit akışlarını toplar:
+    - Varlık = TL BAKIYE
+    - Kaynak = DIS_GIRIS / DIS_CIKIS
+    Çıktı:
+      total_in  : tüm DIS_GIRIS (pozitif)
+      total_out : tüm DIS_CIKIS (pozitif)
+      month_net : son nakit akışı gününün AYI için net (giriş-çıkış)
+      today_net : son nakit akışı gününün neti
+    """
+    if df_trans is None or df_trans.empty:
+        return 0.0, 0.0, 0.0, 0.0
+
+    df = df_trans.dropna(subset=["Tarih"]).copy()
+    if "Kaynak" not in df.columns:
+        df["Kaynak"] = ""
+
+    # Normalizasyon
+    df["Varlık_u"]  = df["Varlık"].astype(str).str.upper().str.strip()
+    df["Kaynak_u"]  = df["Kaynak"].astype(str).str.upper().str.strip()
+    df["Islem_u"]   = df["İşlem"].astype(str).str.upper().str.strip()
+    df["Tarih_dt"]  = pd.to_datetime(df["Tarih"], errors="coerce")
+
+    # Sadece TL BAKIYE ve DIS_GIRIS / DIS_CIKIS satırları
+    df = df[
+        (df["Varlık_u"] == "TL BAKIYE") &
+        (df["Kaynak_u"].isin(["DIS_GIRIS", "DIS_CIKIS"]))
+    ].copy()
+
+    if df.empty:
+        return 0.0, 0.0, 0.0, 0.0
+
+    # Net tutar (TL cinsinden): DIS_GIRIS = +, DIS_CIKIS = -
+    def _net(row):
+        amt = float(row.get("Adet", 0) or 0)
+        if row["Kaynak_u"] == "DIS_GIRIS" and row["Islem_u"] == "ALIS":
+            return amt
+        if row["Kaynak_u"] == "DIS_CIKIS" and row["Islem_u"] == "SATIS":
+            return -amt
+        return 0.0
+
+    df["Net"] = df.apply(_net, axis=1)
+
+    # Toplam giriş / çıkış
+    total_in  = float(df.loc[df["Net"] > 0, "Net"].sum())
+    total_out = float(-df.loc[df["Net"] < 0, "Net"].sum())
+
+    # Gün bazlı net
+    df["Gun"] = df["Tarih_dt"].dt.date
+    per_day = df.groupby("Gun")["Net"].sum().sort_index()
+
+    if per_day.empty:
+        return total_in, total_out, 0.0, 0.0
+
+    last_day = per_day.index.max()
+    today_net = float(per_day.loc[last_day])
+
+    # Son günün AYI için net
+    month_mask = (
+        (per_day.index >= last_day.replace(day=1)) &
+        (per_day.index <= last_day)
+    )
+    month_net = float(per_day[month_mask].sum())
+
+    return total_in, total_out, month_net, today_net
     
 def external_cashflow_table(df_trans, limit=50):
     """
@@ -1348,10 +1308,6 @@ def main():
         total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
         net_invested = total_in - total_out          # dışarıdan net koyduğun para (TL baz)
         performance = tot_w - net_invested           # toplam servetten net yatırımı çıkar
-
-        df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
-        total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
-        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
     
         # 🔍 DEBUG: realized detaylarını gör
         with st.expander("DEBUG - Realized Detayı", expanded=False):
