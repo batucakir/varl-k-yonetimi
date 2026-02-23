@@ -1587,6 +1587,7 @@ def main():
                 
                     st.dataframe(
                         df_show.style.format({
+                            "Adet %": "%{:,.2f}",
                             "Fiyat": "{:,.2f}",
                             "Ortalama Maliyet": "{:,.2f}",
                             "Maliyet": "{:,.2f}",
