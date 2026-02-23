@@ -537,61 +537,109 @@ def calculate_realized_pnl(df_trans):
 
     return total_realized, month_realized, today_realized
 
-def calculate_external_cashflows(df_trans):
+def calculate_realized_pnl(df_trans):
     """
-    Dış nakit akışı sadece TL Bakiye satırlarında ve Kaynak alanına göre sayılır:
-      - DIS_GIRIS  + ALIS  => dışarıdan para girişi
-      - DIS_CIKIS  + SATIS => dışarıya para çıkışı
-    PORTFOY_ICI hareketler (altın satıp TL’ye geçmek gibi) cashflow sayılmaz.
+    Portföy içi realized P&L:
+      - sadece PORTFOY_ICI işlemler
+      - NAKİT / TL Bakiye bacakları hariç
+      - total_realized : tüm zamanların toplam realized'ı
+      - month_realized : SON realized gününün bulunduğu ayın toplam realized'ı
+      - today_realized : SON realized gününün realized'ı
     """
     if df_trans is None or df_trans.empty:
-        return 0.0, 0.0, 0.0, 0.0  # total_in, total_out, month_net, today_net
+        return 0.0, 0.0, 0.0
 
+    # Tarihe göre sırala, NaN'leri at
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
 
-    # Kaynak kolonu yoksa güvenli şekilde ekle
+    # Bu satırlar yoksa bile güvenli ol
     if "Kaynak" not in df.columns:
         df["Kaynak"] = ""
 
-    today = datetime.now().date()
-    this_month = today.month
-    this_year = today.year
+    positions = {}     # varlık -> {adet, maliyet}
+    rows = []          # her satış için: gün + realized
 
-    total_in = 0.0
-    total_out = 0.0
-    month_net = 0.0
-    today_net = 0.0
+    for _, row in df.iterrows():
+        raw_v = str(row.get("Varlık", "")).strip()
+        v = _canon_asset_name(raw_v)
 
-    for _, r in df.iterrows():
-        varlik = str(r.get("Varlık", "")).upper().strip()
-        if varlik != "TL BAKIYE":
+        tur = str(row.get("Tür", "")).upper().strip()
+        kaynak = str(row.get("Kaynak", "")).upper().strip()
+        islem = _normalize_islem(row.get("İşlem", ""))
+        adet = float(row.get("Adet", 0) or 0)
+        fiyat = float(row.get("Fiyat", 0) or 0)
+        tarih = row.get("Tarih")
+        gun = _normalize_date(tarih)
+
+        # Geçersiz kayıtları at
+        if not v or adet <= 0 or gun is None:
             continue
 
-        islem = str(r.get("İşlem", "")).upper().strip()
-        kaynak = str(r.get("Kaynak", "")).upper().strip()
-        adet = float(r.get("Adet", 0) or 0)
-        tarih_val = r.get("Tarih")
-
-        net = 0.0
-        if kaynak == "DIS_GIRIS" and islem == "ALIS":
-            total_in += adet
-            net = adet
-        elif kaynak == "DIS_CIKIS" and islem == "SATIS":
-            total_out += adet
-            net = -adet
-        else:
-            # PORTFOY_ICI veya boş ise cashflow sayma
+        # Dış giriş/çıkışlar realized değil → sadece PORTFOY_ICI
+        if kaynak and kaynak != "PORTFOY_ICI":
             continue
 
-        # tarih güvenli şekilde işleniyor
-        if pd.notna(tarih_val):
-            d = pd.Timestamp(tarih_val).date()
-            if d == today:
-                today_net += net
-            if d.year == this_year and d.month == this_month:
-                month_net += net
+        # Nakit ve TL Bakiye hiç girmesin
+        if v == "TL BAKIYE" or tur == "NAKİT":
+            continue
 
-    return total_in, total_out, month_net, today_net
+        # Pozisyon sözlüğü
+        if v not in positions:
+            positions[v] = {"adet": 0.0, "maliyet": 0.0}
+
+        if islem == "ALIS":
+            positions[v]["adet"] += adet
+            positions[v]["maliyet"] += adet * fiyat
+
+        elif islem == "SATIS":
+            held = positions[v]["adet"]
+            if held <= 0:
+                # Eldeki adetten fazla satmış eski kayıt vs → realized sayma
+                continue
+
+            qty = min(adet, held)
+            avg_cost = positions[v]["maliyet"] / held if held > 0 else 0.0
+            realized = (fiyat - avg_cost) * qty
+
+            # Gün bazlı kayıt tut
+            rows.append({
+                "Gun": gun,
+                "Varlık": v,
+                "Adet": qty,
+                "Fiyat": fiyat,
+                "MaliyetOrt": avg_cost,
+                "Realized": realized,
+            })
+
+            # Pozisyonu azalt
+            positions[v]["adet"] -= qty
+            positions[v]["maliyet"] -= avg_cost * qty
+
+    # Hiç satış yoksa
+    if not rows:
+        return 0.0, 0.0, 0.0
+
+    df_sales = pd.DataFrame(rows)
+
+    # Güvenlik: çok küçük yuvarlama hatalarını sıfıra çek
+    df_sales["Realized"] = df_sales["Realized"].round(6)
+
+    df_sales["Gun"] = pd.to_datetime(df_sales["Gun"])
+    per_day = df_sales.groupby("Gun")["Realized"].sum().sort_index()
+
+    total_realized = float(per_day.sum())
+
+    last_day = per_day.index.max()   # Timestamp
+
+    month_mask = (
+        (per_day.index.year == last_day.year) &
+        (per_day.index.month == last_day.month)
+    )
+    month_realized = float(per_day[month_mask].sum())
+
+    today_realized = float(per_day.loc[last_day])
+
+    return total_realized, month_realized, today_realized
 
     
 def external_cashflow_table(df_trans, limit=50):
@@ -1301,6 +1349,21 @@ def main():
         net_invested = total_in - total_out          # dışarıdan net koyduğun para (TL baz)
         performance = tot_w - net_invested           # toplam servetten net yatırımı çıkar
 
+        df_view, tot_w, tot_t = calculate_portfolio(df_trans, df_prices)
+        total_realized, month_realized, today_realized = calculate_realized_pnl(df_trans)
+        total_in, total_out, month_net_cf, today_net_cf = calculate_external_cashflows(df_trans)
+    
+        # 🔍 DEBUG: realized detaylarını gör
+        with st.expander("DEBUG - Realized Detayı", expanded=False):
+            st.write("Son 10 işlem (Islemler sheet):")
+            st.dataframe(df_trans.tail(10))
+    
+            # Fonksiyon içinden df_sales'i göremiyoruz ama hızlı bir kontrol:
+            st.write("Hesaplanan değerler:")
+            st.write("total_realized =", total_realized)
+            st.write("month_realized =", month_realized)
+            st.write("today_realized =", today_realized)
+        
         b1, b2 = st.columns([1, 3])
         with b1:
             if st.button("📌 Snapshot Kaydet (TL)", use_container_width=True):
