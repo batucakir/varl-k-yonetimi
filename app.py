@@ -1454,7 +1454,7 @@ def main():
                     h3.metric("Kalan Gün", f"{gun_kaldi} gün")
                 
                     st.caption(
-                        f"⏳ Bitiş tarihi: **{HEDEF_TARIH.strftime('%d.%m.%Y')}** – hedefe ulaştığında bu bar dolacak."
+                        f"⏳ Bitiş tarihi: **{HEDEF_TARIH.strftime('%d.%m.%Y')}**"
                     )
                 
                     st.markdown("</div>", unsafe_allow_html=True)
@@ -1587,7 +1587,6 @@ def main():
                 
                     st.dataframe(
                         df_show.style.format({
-                            "Adet %": "%{:,.2f}",
                             "Fiyat": "{:,.2f}",
                             "Ortalama Maliyet": "{:,.2f}",
                             "Maliyet": "{:,.2f}",
