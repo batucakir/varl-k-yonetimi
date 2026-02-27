@@ -183,8 +183,8 @@ button:hover {
 # --- AYARLAR ---
 SHEET_NAME = "PortfoyVerileri"
 CONFIG_SHEET_NAME = "Ayarlar"
-HEDEF_SERVET_TL = 2000000
-HEDEF_TARIH = datetime(2026, 2, 28)
+HEDEF_SERVET_TL = 2250000
+HEDEF_TARIH = datetime(2026, 3, 31)
 FON_VERGI_ORANI = 0.175
 MY_FUNDS = ["TLY", "DFI", "TP2", "PHE", "ROF", "PBR"]
 
