@@ -310,8 +310,13 @@ def find_smart_price(row, asset_name):
     if "TL Bakiye" in asset_name:
         return 1.0
 
-    sterm = asset_name.replace(" (Adet)", "").replace(" (Gr)", "").replace(" (Hisse)", "").replace(" FONU", "").strip()
+    # Varlık ismindeki kalabalıkları temizle
+    sterm = asset_name.upper()
+    sterm = sterm.replace(" (ADET)", "").replace(" (GR)", "").replace(" (HISSE)", "")
+    sterm = sterm.replace(" (HİSSE)", "").replace(" HISSE", "").replace(" HİSSE", "")
+    sterm = sterm.replace(" FONU", "").replace(" FON", "").strip()
 
+    # Altın eşleşmeleri
     gmap = {
         "22 AYAR BİLEZİK": "22 AYAR ALTIN ALIŞ",
         "ATA ALTIN": "ATA ALTIN ALIŞ",
@@ -320,9 +325,13 @@ def find_smart_price(row, asset_name):
     if sterm in gmap:
         return row.get(gmap[sterm], 0)
 
+    # Genel eşleşme (ODINE araması yapılırken Sheets'teki "ODINE.IS FİYAT" veya "ODINE FİYAT"ı bulur)
     for col in row.index:
-        if sterm in col:
+        col_u = str(col).upper()
+        # Eğer sterm (Örn: ODINE) sütun başlığının içinde geçiyorsa (Örn: ODINE.IS FİYAT)
+        if sterm in col_u:
             return row[col]
+            
     return 0.0
 
 def calculate_portfolio(df_trans, df_prices):
