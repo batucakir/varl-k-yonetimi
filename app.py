@@ -326,10 +326,15 @@ def find_smart_price(row, asset_name):
         return row.get(gmap[sterm], 0)
 
     # Genel eşleşme (ODINE araması yapılırken Sheets'teki "ODINE.IS FİYAT" veya "ODINE FİYAT"ı bulur)
+    # Sadece "FİYAT" veya "FIYAT" içeren sütunlara öncelik ver
     for col in row.index:
         col_u = str(col).upper()
-        # Eğer sterm (Örn: ODINE) sütun başlığının içinde geçiyorsa (Örn: ODINE.IS FİYAT)
-        if sterm in col_u:
+        if sterm in col_u and ("FİYAT" in col_u or "FIYAT" in col_u):
+            return row[col]
+    
+    # Eğer yukarıda bulamazsa normal aramaya dön
+    for col in row.index:
+        if sterm in str(col).upper():
             return row[col]
             
     return 0.0
