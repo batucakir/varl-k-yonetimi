@@ -307,38 +307,41 @@ def load_data():
         return pd.DataFrame(), pd.DataFrame(), []
 
 def find_smart_price(row, asset_name):
-    s = str(asset_name).upper()
+    # 1. İsmi standart hale getir
+    s = str(asset_name).strip()
     
-    # 1. NAKİT KONTROLÜ
-    if "TL BAKIYE" in s:
+    # 2. Nakit Kontrolü
+    if "TL Bakiye" in s:
         return 1.0
 
-    # 2. ALTIN KONTROLÜ (Tam Eşleşme)
-    gmap = {
-        "22 AYAR BİLEZİK (GR)": "22 AYAR ALTIN ALIŞ",
-        "ATA ALTIN (ADET)": "ATA ALTIN ALIŞ",
-        "ÇEYREK ALTIN (ADET)": "ÇEYREK ALTIN ALIŞ",
+    # 3. ALTINLAR İÇİN NOKTA ATIŞI (Kelimeler tam eşleşmeli)
+    gold_mapping = {
+        "22 AYAR BİLEZİK (Gr)": "22 AYAR ALTIN ALIŞ",
+        "ATA ALTIN (Adet)": "ATA ALTIN ALIŞ",
+        "ÇEYREK ALTIN (Adet)": "ÇEYREK ALTIN ALIŞ",
         "22 AYAR BİLEZİK": "22 AYAR ALTIN ALIŞ",
         "ATA ALTIN": "ATA ALTIN ALIŞ",
         "ÇEYREK ALTIN": "ÇEYREK ALTIN ALIŞ"
     }
-    if s in gmap:
-        return float(row.get(gmap[s], 0))
+    if s in gold_mapping:
+        target_col = gold_mapping[s]
+        if target_col in row.index:
+            return float(row[target_col] or 0.0)
 
-    # 3. HİSSE KONTROLÜ (Tam Eşleşme)
-    # "ODINE HİSSE" içinden sadece "ODINE" kısmını alalım
-    ticker = s.replace("HİSSE", "").replace("HISSE", "").strip()
+    # 4. FONLAR VE HİSSELER İÇİN TAM EŞLEŞME
+    # "TLY FONU" -> "TLY", "ODINE HİSSE" -> "ODINE.IS FİYAT"
+    clean_name = s.replace(" FONU", "").replace(" HİSSE", "").replace(" HISSE", "").strip()
     
-    # Excel sütunlarında "ODINE.IS FİYAT" veya "ODINE FİYAT" ara
-    exact_match_1 = f"{ticker}.IS FİYAT"
-    exact_match_2 = f"{ticker} FİYAT"
+    # Denenecek sütun isimleri sırasıyla:
+    targets = [
+        f"{clean_name}.IS FİYAT", 
+        f"{clean_name} FİYAT", 
+        clean_name
+    ]
     
-    if exact_match_1 in row.index:
-        return float(row[exact_match_1] or 0)
-    if exact_match_2 in row.index:
-        return float(row[exact_match_2] or 0)
-    if ticker in row.index: # TLY, PHE gibi fonlar için
-        return float(row[ticker] or 0)
+    for t in targets:
+        if t in row.index:
+            return float(row[t] or 0.0)
 
     return 0.0
 
