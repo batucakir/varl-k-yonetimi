@@ -307,30 +307,39 @@ def load_data():
         return pd.DataFrame(), pd.DataFrame(), []
 
 def find_smart_price(row, asset_name):
-    if "TL Bakiye" in asset_name:
+    s = str(asset_name).upper()
+    
+    # 1. NAKİT KONTROLÜ
+    if "TL BAKIYE" in s:
         return 1.0
 
-    # İsmi temizle
-    s = str(asset_name).upper().replace("HİSSE", "").replace("HISSE", "").replace("FONU", "").strip()
-    
-    # Öncelik: Tam eşleşme veya ".IS FİYAT" içeren sütun
-    possible_cols = [
-        f"{s}.IS FİYAT", 
-        f"{s} FİYAT", 
-        f"{s}.IS FIYAT", 
-        f"{s} FIYAT", 
-        s
-    ]
-    
-    for p_col in possible_cols:
-        if p_col in row.index:
-            return float(row[p_col] or 0)
+    # 2. ALTIN KONTROLÜ (Tam Eşleşme)
+    gmap = {
+        "22 AYAR BİLEZİK (GR)": "22 AYAR ALTIN ALIŞ",
+        "ATA ALTIN (ADET)": "ATA ALTIN ALIŞ",
+        "ÇEYREK ALTIN (ADET)": "ÇEYREK ALTIN ALIŞ",
+        "22 AYAR BİLEZİK": "22 AYAR ALTIN ALIŞ",
+        "ATA ALTIN": "ATA ALTIN ALIŞ",
+        "ÇEYREK ALTIN": "ÇEYREK ALTIN ALIŞ"
+    }
+    if s in gmap:
+        return float(row.get(gmap[s], 0))
 
-    # Fallback: Eğer hala bulamadıysa içinde geçenlere bak (ama hata payı yüksektir)
-    for col in row.index:
-        if s in str(col).upper():
-            return float(row[col] or 0)
-            
+    # 3. HİSSE KONTROLÜ (Tam Eşleşme)
+    # "ODINE HİSSE" içinden sadece "ODINE" kısmını alalım
+    ticker = s.replace("HİSSE", "").replace("HISSE", "").strip()
+    
+    # Excel sütunlarında "ODINE.IS FİYAT" veya "ODINE FİYAT" ara
+    exact_match_1 = f"{ticker}.IS FİYAT"
+    exact_match_2 = f"{ticker} FİYAT"
+    
+    if exact_match_1 in row.index:
+        return float(row[exact_match_1] or 0)
+    if exact_match_2 in row.index:
+        return float(row[exact_match_2] or 0)
+    if ticker in row.index: # TLY, PHE gibi fonlar için
+        return float(row[ticker] or 0)
+
     return 0.0
 
 def calculate_portfolio(df_trans, df_prices):
