@@ -1710,6 +1710,20 @@ def main():
 
             return syms
 
+        rows = []
+        for sym in sorted(list(universe)):
+            col = find_price_column_for_symbol(sym)
+            if not col:
+                continue
+            
+            # .get() içine default 0 koyarak "boş" gelirse çökmesini engelle
+            lp = float(last.get(col, 0) or 0)
+            pp = float(prev.get(col, 0) or 0)
+            
+            # Payda 0 ise hata vermemesi için kontrol
+            chg = ((lp - pp) / pp) * 100 if pp > 0 else 0
+            rows.append({"Sembol": sym, "Fiyat": lp, "Günlük %": chg, "Kolon": col})
+            
         def symbols_from_sheet_columns(df_prices_local):
             syms = set()
             if df_prices_local is None or df_prices_local.empty:
