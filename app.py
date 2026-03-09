@@ -310,32 +310,26 @@ def find_smart_price(row, asset_name):
     if "TL Bakiye" in asset_name:
         return 1.0
 
-    # Varlık ismindeki kalabalıkları temizle
-    sterm = asset_name.upper()
-    sterm = sterm.replace(" (ADET)", "").replace(" (GR)", "").replace(" (HISSE)", "")
-    sterm = sterm.replace(" (HİSSE)", "").replace(" HISSE", "").replace(" HİSSE", "")
-    sterm = sterm.replace(" FONU", "").replace(" FON", "").strip()
-
-    # Altın eşleşmeleri
-    gmap = {
-        "22 AYAR BİLEZİK": "22 AYAR ALTIN ALIŞ",
-        "ATA ALTIN": "ATA ALTIN ALIŞ",
-        "ÇEYREK ALTIN": "ÇEYREK ALTIN ALIŞ"
-    }
-    if sterm in gmap:
-        return row.get(gmap[sterm], 0)
-
-    # Genel eşleşme (ODINE araması yapılırken Sheets'teki "ODINE.IS FİYAT" veya "ODINE FİYAT"ı bulur)
-    # Sadece "FİYAT" veya "FIYAT" içeren sütunlara öncelik ver
-    for col in row.index:
-        col_u = str(col).upper()
-        if sterm in col_u and ("FİYAT" in col_u or "FIYAT" in col_u):
-            return row[col]
+    # İsmi temizle
+    s = str(asset_name).upper().replace("HİSSE", "").replace("HISSE", "").replace("FONU", "").strip()
     
-    # Eğer yukarıda bulamazsa normal aramaya dön
+    # Öncelik: Tam eşleşme veya ".IS FİYAT" içeren sütun
+    possible_cols = [
+        f"{s}.IS FİYAT", 
+        f"{s} FİYAT", 
+        f"{s}.IS FIYAT", 
+        f"{s} FIYAT", 
+        s
+    ]
+    
+    for p_col in possible_cols:
+        if p_col in row.index:
+            return float(row[p_col] or 0)
+
+    # Fallback: Eğer hala bulamadıysa içinde geçenlere bak (ama hata payı yüksektir)
     for col in row.index:
-        if sterm in str(col).upper():
-            return row[col]
+        if s in str(col).upper():
+            return float(row[col] or 0)
             
     return 0.0
 
