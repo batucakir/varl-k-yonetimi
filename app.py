@@ -991,7 +991,7 @@ FON_GREEN_TONES = [
     "#1f7a1f"
 ]
 
-FON_BLUE_TONES == [
+FON_BLUE_TONES = [
     "#0000FF",  # koyu
     "#00FFFF",
     "#00A36C",
