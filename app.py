@@ -254,7 +254,7 @@ def load_data():
         client = get_client()
         sheet = client.open(SHEET_NAME)
 
-        # Prices sheet (sheet1)
+        # Prices sheet 
         ws_prices = sheet.sheet1
         data_prices = ws_prices.get_all_values()
         if len(data_prices) > 1:
@@ -266,7 +266,7 @@ def load_data():
             df_prices['Tarih'] = pd.to_datetime(df_prices['Tarih'], errors='coerce')
             df_prices = df_prices.dropna(subset=['Tarih']).sort_values("Tarih").copy()
 
-            # ✅ EKLEME: 0 olan fiyatları eksik say -> ffill ile düzelt
+            # EKLEME: 0 olan fiyatları eksik say -> ffill ile düzelt
             price_cols = [c for c in df_prices.columns if c != "Tarih"]
             df_prices[price_cols] = df_prices[price_cols].replace(0, np.nan).ffill().fillna(0)
         else:
@@ -291,7 +291,7 @@ def load_data():
             df_trans['Adet'] = df_trans['Adet'].apply(clean_numeric)
             df_trans['Fiyat'] = df_trans['Fiyat'].apply(clean_numeric)
             df_trans['Tarih'] = pd.to_datetime(df_trans['Tarih'], dayfirst=True, errors='coerce')
-            # ✅ Kaynak kolonu yoksa (eski sheet'ler için) oluştur
+            # Kaynak kolonu yoksa (eski sheet'ler için) oluştur
             if "Kaynak" not in df_trans.columns:
                 df_trans["Kaynak"] = ""
 
@@ -329,7 +329,6 @@ def find_smart_price(row, asset_name):
             return float(row[target_col] or 0.0)
 
     # 4. FONLAR VE HİSSELER İÇİN TAM EŞLEŞME
-    # "TLY FONU" -> "TLY", "ODINE HİSSE" -> "ODINE.IS FİYAT"
     clean_name = s.replace(" FONU", "").replace(" HİSSE", "").replace(" HISSE", "").strip()
     
     # Denenecek sütun isimleri sırasıyla:
@@ -471,15 +470,14 @@ def calculate_realized_pnl(df_trans):
     if df_trans is None or df_trans.empty:
         return 0.0, 0.0, 0.0
 
-    # Tarihe göre sırala, NaN'leri at
+    # Tarihe göre sıralama
     df = df_trans.dropna(subset=["Tarih"]).sort_values("Tarih").copy()
 
-    # Bu satırlar yoksa bile güvenli ol
     if "Kaynak" not in df.columns:
         df["Kaynak"] = ""
 
-    positions = {}     # varlık -> {adet, maliyet}
-    rows = []          # her satış için: gün + realized
+    positions = {}     
+    rows = []      
 
     for _, row in df.iterrows():
         raw_v = str(row.get("Varlık", "")).strip()
@@ -493,7 +491,7 @@ def calculate_realized_pnl(df_trans):
         tarih = row.get("Tarih")
         gun = _normalize_date(tarih)
 
-        # Geçersiz kayıtları at
+        # Geçersiz kayıtları atma
         if not v or adet <= 0 or gun is None:
             continue
 
@@ -501,7 +499,6 @@ def calculate_realized_pnl(df_trans):
         if kaynak and kaynak != "PORTFOY_ICI":
             continue
 
-        # Nakit ve TL Bakiye hiç girmesin
         if v == "TL BAKIYE" or tur == "NAKİT":
             continue
 
@@ -516,7 +513,6 @@ def calculate_realized_pnl(df_trans):
         elif islem == "SATIS":
             held = positions[v]["adet"]
             if held <= 0:
-                # Eldeki adetten fazla satmış eski kayıt vs → realized sayma
                 continue
 
             qty = min(adet, held)
@@ -533,7 +529,7 @@ def calculate_realized_pnl(df_trans):
                 "Realized": realized,
             })
 
-            # Pozisyonu azalt
+            # Pozisyonu azaltma
             positions[v]["adet"] -= qty
             positions[v]["maliyet"] -= avg_cost * qty
 
@@ -786,7 +782,6 @@ def realized_monthly_summary(df_trans):
     out = out.sort_values("Ay", ascending=False)
     return out
 
-# --- SERVET TRENDİ (DOĞRU HESAP: SADECE O TARİHE KADAR İŞLEMLER) ---
 def prepare_historical_trend(df_prices, df_trans, rate=1.0):
     if df_prices.empty or df_trans.empty:
         return pd.DataFrame()
@@ -799,7 +794,7 @@ def prepare_historical_trend(df_prices, df_trans, rate=1.0):
         return pd.DataFrame()
 
     first_date = df_trans["Tarih"].min()
-    running_qty = {}  # varlık -> adet
+    running_qty = {} 
     trend_data = []
     trans_idx = 0
     trans_rows = df_trans.reset_index(drop=True)
@@ -995,6 +990,16 @@ FON_GREEN_TONES = [
     "#b6e3b6",
     "#1f7a1f"
 ]
+
+FON_BLUE_TONES == [
+    "#0000FF",  # koyu
+    "#00FFFF",
+    "#00A36C",
+    "#96DED1",
+    "#F0FFFF",
+    "#5F9EA0"
+]
+
 # --- YFINANCE TABANLI PİYASA MOTORU ---
 
 @st.cache_data(ttl=300)
