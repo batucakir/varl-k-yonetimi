@@ -1150,10 +1150,11 @@ def asset_color(name: str) -> str:
         return FON_GREEN_TONES[idx]
     # Nakit
     if "TL BAKIYE" in n or "NAKİT" in n or "NAKIT" in n:
-        return "#1f77b4"   # mavi
+        return "#FFBF00"   # turuncu
     # Hisse
     if ".IS" in n or "HİSSE" in n or "HISSE" in n:
-        return "#d62728"   # kırmızı
+        idx = abs(hash(n)) % len(FON_BLUE_TONES)
+        return FON_BLUE_TONES[idx]   # mavi
     # Diğer
     return "#9467bd"       # mor
 
