@@ -1522,7 +1522,7 @@ def main():
                         df_p = pd.DataFrame(columns=[g_col, "Net Değer"])
                 
                     # Ana gruplar sabit renk
-                    c_map_group = {"ALTIN": "#FFD700", "FON": "#2ca02c", "NAKİT": "#1f77b4", "HİSSE": "#d62728", "DÖVİZ": "#9467bd"}
+                    c_map_group = {"ALTIN": "#FFD700", "FON": "#2ca02c", "NAKİT": "#1f77b4", "HİSSE": "#0000FF", "DÖVİZ": "#9467bd"}
                 
                     if view_mode == "Ana Gruplar":
                         color_map = c_map_group
